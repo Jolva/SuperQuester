@@ -1,0 +1,55 @@
+# Minecraft Bedrock Server - Generated Files
+worlds/
+behavior_packs/
+resource_packs/
+development_behavior_packs/
+development_resource_packs/
+development_skin_packs/
+world_templates/
+definitions/
+config/
+
+# Server Binaries & Runtime
+bedrock_server.exe
+bedrock_server
+*.dll
+*.so
+*.dylib
+bedrock_server_how_to.html
+release-notes.txt
+
+# Server Generated Files
+allowlist.json
+permissions.json
+packetlimitconfig.json
+profanity_filter.wlist
+
+# Logs
+*.log
+ContentLog*.txt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.py[cod]
+*$py.class
+
+# OS Files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Backup files
+*.bak
+*.backup
+*_old

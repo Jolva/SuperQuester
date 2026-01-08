@@ -16,8 +16,13 @@ BP_PATH = PROJECT_ROOT / "packs" / "QuestSystemBP"
 RP_PATH = PROJECT_ROOT / "packs" / "QuestSystemRP"
 WORLD_PATH = PROJECT_ROOT / "worlds" / "Super Quester World"
 
-# Windows cache path
-WINDOWS_CACHE = Path.home() / "AppData" / "Local" / "Packages" / "Microsoft.MinecraftUWP_8wekyb3d8bbwe" / "LocalState" / "games" / "com.mojang"
+# Windows cache paths (try multiple locations)
+WINDOWS_CACHE_LOCATIONS = [
+    # Actual Minecraft Bedrock location (uses glob for numeric user ID)
+    Path.home() / "AppData" / "Roaming" / "Minecraft Bedrock",
+    # Fallback: UWP location
+    Path.home() / "AppData" / "Local" / "Packages" / "Microsoft.MinecraftUWP_8wekyb3d8bbwe" / "LocalState" / "games" / "com.mojang"
+]
 
 
 def validate_json(file_path):
@@ -139,23 +144,56 @@ def update_world_pack_configs():
 
 def clear_windows_cache():
     """Clear Minecraft Bedrock cache on Windows"""
-    if not WINDOWS_CACHE.exists():
-        print(f"⚠️  Windows cache not found at {WINDOWS_CACHE}")
-        return
+    cache_cleared = False
     
-    cache_targets = [
-        WINDOWS_CACHE / "minecraftpe",
-        WINDOWS_CACHE / "development_behavior_packs",
-        WINDOWS_CACHE / "development_resource_packs"
-    ]
+    for base_path in WINDOWS_CACHE_LOCATIONS:
+        if not base_path.exists():
+            continue
+        
+        # For Roaming/Minecraft Bedrock, use glob to find user ID folders
+        if "Minecraft Bedrock" in str(base_path):
+            # Look for Users/*/games/com.mojang/minecraftpe
+            user_folders = list(base_path.glob("Users/*/games/com.mojang"))
+            
+            if not user_folders:
+                continue
+            
+            for user_folder in user_folders:
+                cache_targets = [
+                    user_folder / "minecraftpe",
+                    user_folder / "development_behavior_packs",
+                    user_folder / "development_resource_packs"
+                ]
+                
+                for target in cache_targets:
+                    if target.exists():
+                        try:
+                            shutil.rmtree(target)
+                            print(f"✅ Cleared cache: {target}")
+                            cache_cleared = True
+                        except Exception as e:
+                            print(f"⚠️  Could not clear {target.name}: {e}")
+        else:
+            # UWP location - direct paths
+            cache_targets = [
+                base_path / "minecraftpe",
+                base_path / "development_behavior_packs",
+                base_path / "development_resource_packs"
+            ]
+            
+            for target in cache_targets:
+                if target.exists():
+                    try:
+                        shutil.rmtree(target)
+                        print(f"✅ Cleared cache: {target}")
+                        cache_cleared = True
+                    except Exception as e:
+                        print(f"⚠️  Could not clear {target.name}: {e}")
     
-    for target in cache_targets:
-        if target.exists():
-            try:
-                shutil.rmtree(target)
-                print(f"✅ Cleared cache: {target.name}")
-            except Exception as e:
-                print(f"⚠️  Could not clear {target.name}: {e}")
+    if not cache_cleared:
+        print(f"⚠️  No cache folders found in any known locations")
+    
+    return cache_cleared
 
 
 def main():
@@ -214,8 +252,9 @@ def main():
     
     # Step 6: Clear cache (Windows only)
     print("\n🧹 Step 6: Clearing cache...")
+    cache_was_cleared = False
     if sys.platform == "win32":
-        clear_windows_cache()
+        cache_was_cleared = clear_windows_cache()
     else:
         print("  ⚠️  Cache clearing only supported on Windows")
     
@@ -226,7 +265,10 @@ def main():
     print(f"  • BP Version: {'.'.join(map(str, bp_version))}")
     print(f"  • RP Version: {'.'.join(map(str, rp_version))}")
     print(f"  • Packs deployed to: {WORLD_PATH.relative_to(PROJECT_ROOT)}")
-    print(f"  • Cache cleared: {'Yes' if sys.platform == 'win32' else 'N/A (non-Windows)'}")
+    if sys.platform == "win32":
+        print(f"  • Cache cleared: {'Yes' if cache_was_cleared else 'No (not found)'}")
+    else:
+        print(f"  • Cache cleared: N/A (non-Windows)")
     print("\n🎮 Ready to test! Start your Minecraft server.\n")
 
 
