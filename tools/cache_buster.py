@@ -8,6 +8,9 @@ import json
 import uuid
 import shutil
 import sys
+import subprocess
+import os
+import time
 from pathlib import Path
 
 # Define paths
@@ -83,15 +86,16 @@ def generate_new_uuids(manifest_path):
     return old_header_uuid, manifest['header']['uuid']
 
 
-def update_rp_dependency(rp_manifest_path, new_bp_uuid):
-    """Update resource pack dependency to reference new behavior pack UUID"""
+def update_rp_dependency(rp_manifest_path, new_bp_uuid, new_bp_version):
+    """Update resource pack dependency to reference new behavior pack UUID and version"""
     with open(rp_manifest_path, 'r', encoding='utf-8') as f:
         manifest = json.load(f)
     
-    # Update dependency to new BP UUID
+    # Update dependency to new BP UUID and version
     for dep in manifest.get('dependencies', []):
         if 'uuid' in dep:  # BP dependency uses UUID, not module_name
             dep['uuid'] = new_bp_uuid
+            dep['version'] = new_bp_version  # Critical: keep version in sync
     
     with open(rp_manifest_path, 'w', encoding='utf-8') as f:
         json.dump(manifest, f, indent=2)
@@ -196,10 +200,48 @@ def clear_windows_cache():
     return cache_cleared
 
 
+def kill_running_server():
+    """Kill bedrock_server.exe if it's running (Windows only)"""
+    if sys.platform != "win32":
+        return False
+    
+    try:
+        # Check if bedrock_server.exe is running
+        result = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq bedrock_server.exe"],
+            capture_output=True,
+            text=True
+        )
+        
+        if "bedrock_server.exe" in result.stdout:
+            print("🛑 Bedrock server is running. Stopping it...")
+            
+            # Kill the process
+            subprocess.run(["taskkill", "/F", "/IM", "bedrock_server.exe"], 
+                         capture_output=True)
+            
+            # Wait a moment for process to fully terminate
+            time.sleep(2)
+            
+            print("✅ Server stopped successfully")
+            return True
+        else:
+            print("ℹ️  Server is not running")
+            return False
+            
+    except Exception as e:
+        print(f"⚠️  Could not check/kill server: {e}")
+        return False
+
+
 def main():
     print("=" * 60)
     print("🔧 CACHE BUSTER - Minecraft Bedrock Addon Deployment")
     print("=" * 60)
+    
+    # Step 0: Kill running server if needed
+    print("\n🔍 Checking for running server...")
+    kill_running_server()
     
     # Step 1: Validate all JSON files
     print("\n📋 Step 1: Validating JSON files...")
@@ -234,9 +276,9 @@ def main():
     print(f"  ✅ New BP Header UUID: {new_bp_uuid}")
     print(f"  ✅ New RP Header UUID: {new_rp_uuid}")
     
-    # Update RP dependency to reference new BP UUID
-    update_rp_dependency(RP_PATH / "manifest.json", new_bp_uuid)
-    print(f"  ✅ Updated RP dependency to reference new BP UUID")
+    # Update RP dependency to reference new BP UUID and version
+    update_rp_dependency(RP_PATH / "manifest.json", new_bp_uuid, bp_version)
+    print(f"  ✅ Updated RP dependency to reference new BP UUID and version")
     
     # Step 4: Deploy packs
     print("\n📦 Step 4: Deploying packs to world...")
