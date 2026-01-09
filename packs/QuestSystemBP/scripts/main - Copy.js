@@ -12,15 +12,11 @@ import { registerSafeZoneEvents } from "./safeZone.js";
  * - Persistent User State (player.name)
  */
 
-// Log on world load (Kept from original main.js)
-world.afterEvents.worldInitialize.subscribe(() => {
-  console.warn('Quest System BP loaded successfully');
-});
-
 /** -----------------------------
  *  Config
  *  ----------------------------- */
 
+const BOARD_BLOCK_ID = "minecraft:lectern";
 const MAX_ACTIVE_QUESTS = 2;
 const FALLBACK_COMMAND = "!quests";
 
@@ -268,34 +264,30 @@ function addTabButtons(form, currentTab, actionsList) {
   }
 }
 
-async function showAvailableTab(player, actions, isStandalone = false) {
+async function showAvailableTab(player, actions) {
   const available = getAvailableQuestDefinitions(player);
   const quests = getPlayerQuests(player);
 
-  // If standalone, simplify header, otherwise use full header
-  const header = isStandalone ? "" : "§2§l[ AVAILABLE ]§r\n\n";
   const body = [
-    `${header}§7Active: ${quests.length}/${MAX_ACTIVE_QUESTS}§r`,
+    "§2§l[ AVAILABLE ]§r",
+    "",
+    `§7Active: ${quests.length}/${MAX_ACTIVE_QUESTS}§r`,
     "",
     available.length ? "§fNew Requests:§r" : "§7No new quests available. Check back later.§r",
   ].join("\n");
 
-  const title = isStandalone ? "§lAvailable Quests§r" : "§lQuest Board§r";
-
   const form = new ActionFormData()
-    .title(title)
+    .title("§lQuest Board§r")
     .body(body);
 
   // 1. Tabs
-  if (!isStandalone) {
-    addTabButtons(form, BOARD_TABS.AVAILABLE, actions);
-  }
+  addTabButtons(form, BOARD_TABS.AVAILABLE, actions);
 
   // 2. Content
   for (const def of available) {
     const icon = getQuestIcon(def);
     form.button(`Accept: ${def.title}`, icon);
-    actions.push({ type: "accept", questId: def.id, fromStandalone: isStandalone });
+    actions.push({ type: "accept", questId: def.id });
   }
 
   // 3. Close option (always good UX)
@@ -305,25 +297,22 @@ async function showAvailableTab(player, actions, isStandalone = false) {
   return form;
 }
 
-async function showActiveTab(player, actions, isStandalone = false) {
+async function showActiveTab(player, actions) {
   const myQuests = getMyQuests(player);
 
-  const header = isStandalone ? "" : "§2§l[ ACTIVE ]§r\n\n";
   const body = [
-    `${header}§7Your Quests (${myQuests.length}/${MAX_ACTIVE_QUESTS}):§r`,
+    "§2§l[ ACTIVE ]§r",
+    "",
+    `§7Your Quests (${myQuests.length}/${MAX_ACTIVE_QUESTS}):§r`,
     myQuests.length ? "" : "§7You have no active quests.§r"
   ].join("\n");
 
-  const title = isStandalone ? "§lActive Quests§r" : "§lQuest Board§r";
-
   const form = new ActionFormData()
-    .title(title)
+    .title("§lQuest Board§r")
     .body(body);
 
   // 1. Tabs
-  if (!isStandalone) {
-    addTabButtons(form, BOARD_TABS.ACTIVE, actions);
-  }
+  addTabButtons(form, BOARD_TABS.ACTIVE, actions);
 
   // 2. Content
   for (const quest of myQuests) {
@@ -332,13 +321,13 @@ async function showActiveTab(player, actions, isStandalone = false) {
 
     if (quest.status === "complete") {
       form.button(`§aTurn In: ${quest.title}§r`, "textures/quest_ui/quest_tab_done.png");
-      actions.push({ type: "turnIn", questId: quest.id, fromStandalone: isStandalone });
+      actions.push({ type: "turnIn", questId: quest.id });
     } else {
       // Show progress
       const progressStr = quest.goal > 0 ? `${quest.progress}/${quest.goal}` : "In Progress";
       form.button(`${quest.title}\n§7${progressStr}§r`, icon);
       // Clicking an active quest gives options (Abandon)
-      actions.push({ type: "manage", questId: quest.id, fromStandalone: isStandalone });
+      actions.push({ type: "manage", questId: quest.id });
     }
   }
 
@@ -348,13 +337,12 @@ async function showActiveTab(player, actions, isStandalone = false) {
   return form;
 }
 
-async function showLeaderboardTab(player, actions, isStandalone = false) {
+async function showLeaderboardTab(player, actions) {
   const { entries, currentPlayer, missingObjective } = getLeaderboardEntries(player);
 
-  const header = isStandalone ? "" : "§2§l[ LEADERBOARD ]§r\n\n";
   let bodyText = missingObjective
     ? "§cLeaderboard unavailable.§r"
-    : `${header}§7Top Survivors:§r\n`;
+    : "§2§l[ LEADERBOARD ]§r\n\n§7Top Survivors:§r\n";
 
   if (!missingObjective) {
     if (entries.length === 0) {
@@ -369,20 +357,16 @@ async function showLeaderboardTab(player, actions, isStandalone = false) {
     }
   }
 
-  const title = isStandalone ? "§lLeaderboard§r" : "§lQuest Board§r";
-
   const form = new ActionFormData()
-    .title(title)
+    .title("§lQuest Board§r")
     .body(bodyText);
 
   // 1. Tabs
-  if (!isStandalone) {
-    addTabButtons(form, BOARD_TABS.LEADERBOARD, actions);
-  }
+  addTabButtons(form, BOARD_TABS.LEADERBOARD, actions);
 
   // 2. Content (Leaderboard is mostly read-only, maybe a Refresh button?)
   form.button("Refresh");
-  actions.push({ type: "nav", tab: BOARD_TABS.LEADERBOARD, fromStandalone: isStandalone });
+  actions.push({ type: "nav", tab: BOARD_TABS.LEADERBOARD });
 
   form.button("Close");
   actions.push({ type: "close" });
@@ -390,30 +374,28 @@ async function showLeaderboardTab(player, actions, isStandalone = false) {
   return form;
 }
 
-async function showQuestBoard(player, forcedTab = null, isStandalone = false) {
+async function showQuestBoard(player, forcedTab = null) {
   player.playSound("item.book.page_turn");
   expireQuestsForPlayer(player);
 
   const tab = forcedTab || getPlayerTab(player);
-  if (!isStandalone) {
-    setPlayerTab(player, tab); // Ensure state is synced only if navigating
-  }
+  setPlayerTab(player, tab); // Ensure state is synced
 
   let form;
   const actions = []; // List of actions corresponding to buttons by index
 
   switch (tab) {
     case BOARD_TABS.AVAILABLE:
-      form = await showAvailableTab(player, actions, isStandalone);
+      form = await showAvailableTab(player, actions);
       break;
     case BOARD_TABS.ACTIVE:
-      form = await showActiveTab(player, actions, isStandalone);
+      form = await showActiveTab(player, actions);
       break;
     case BOARD_TABS.LEADERBOARD:
-      form = await showLeaderboardTab(player, actions, isStandalone);
+      form = await showLeaderboardTab(player, actions);
       break;
     default:
-      form = await showAvailableTab(player, actions, isStandalone);
+      form = await showAvailableTab(player, actions);
       break;
   }
 
@@ -429,12 +411,9 @@ async function showQuestBoard(player, forcedTab = null, isStandalone = false) {
 async function handleUiAction(player, action) {
   if (action.type === "close") return;
 
-  const isStandalone = action.fromStandalone ?? false;
-
   if (action.type === "nav") {
-    // Switch tab - Nav usually implies tab switching so we might drop standalone?
-    // But if we have a refresh button under Leaderboard standalone, we want to keep it.
-    await showQuestBoard(player, action.tab, isStandalone);
+    // Switch tab
+    await showQuestBoard(player, action.tab);
     return;
   }
 
@@ -446,28 +425,29 @@ async function handleUiAction(player, action) {
       const def = getQuestDefinition(action.questId);
       player.sendMessage(`§aAccepted: ${def.title}§r`);
     }
-    // Refresh the board, respecting standalone state
-    await showQuestBoard(player, BOARD_TABS.AVAILABLE, isStandalone);
+    // Stay on Available or switch to Active? Usually staying is better UX for picking multiple,
+    // but the Prompt doesn't specify. I'll refresh current tab.
+    await showQuestBoard(player, BOARD_TABS.AVAILABLE);
     return;
   }
 
   if (action.type === "turnIn") {
     handleQuestTurnIn(player, action.questId);
-    await showQuestBoard(player, BOARD_TABS.ACTIVE, isStandalone);
+    await showQuestBoard(player, BOARD_TABS.ACTIVE);
     return;
   }
 
   if (action.type === "manage") {
     // Show management for specific quest (Abandon)
-    await showQuestDetails(player, action.questId, isStandalone);
+    await showQuestDetails(player, action.questId);
     return;
   }
 }
 
-async function showQuestDetails(player, questId, isStandalone = false) {
+async function showQuestDetails(player, questId) {
   const state = getActiveQuestState(player, questId);
   if (!state) {
-    await showQuestBoard(player, BOARD_TABS.ACTIVE, isStandalone);
+    await showQuestBoard(player, BOARD_TABS.ACTIVE);
     return;
   }
 
@@ -480,14 +460,14 @@ async function showQuestDetails(player, questId, isStandalone = false) {
 
   const res = await form.show(player);
   if (res.canceled || res.selection === 0) {
-    await showQuestBoard(player, BOARD_TABS.ACTIVE, isStandalone);
+    await showQuestBoard(player, BOARD_TABS.ACTIVE);
     return;
   }
 
   if (res.selection === 1) {
     const removed = abandonQuest(player, questId);
     if (removed) player.sendMessage(`§eAbandoned: ${removed.title}§r`);
-    await showQuestBoard(player, BOARD_TABS.ACTIVE, isStandalone);
+    await showQuestBoard(player, BOARD_TABS.ACTIVE);
   }
 }
 
@@ -658,71 +638,40 @@ function handleQuestTurnIn(player, questId) {
  *  Interaction & Wiring
  *  ----------------------------- */
 
-const BLOCK_TAB_MAP = {
-  "quest:board_available": "available",     // Maps to BOARD_TABS.AVAILABLE
-  "quest:board_active": "active",           // Maps to BOARD_TABS.ACTIVE
-  "quest:board_leaderboard": "leaderboard"  // Maps to BOARD_TABS.LEADERBOARD
-};
-
-const lastInteractTime = new Map();
-const builderModePlayers = new Set();
+function isBoardBlock(block) {
+  return block?.typeId === BOARD_BLOCK_ID;
+}
 
 function wireInteractions() {
-  const handleInteraction = (player, block) => {
-    if (!player || !block) return false;
-
-    // Builder Mode check
-    if (builderModePlayers.has(player.name)) return false;
-
-    // Check if it's our block FIRST
-    const tab = BLOCK_TAB_MAP[block.typeId];
-    if (!tab) return false;
-
-    // Debounce only for our blocks
-    const now = Date.now();
-    const lastTime = lastInteractTime.get(player.name) || 0;
-    if (now - lastTime < 500) return true; // Blocked (ignored) but return true to say "handled/cancel"
-    lastInteractTime.set(player.name, now);
-
-    system.run(() => showQuestBoard(player, tab, true)); // true = standalone
-    return true;
-  };
-
+  // Use ITEM interaction first as requested by USER
+  // "Trigger via system.run within the beforeEvents.itemUseOn handler"
   const itemUseOn = world.beforeEvents?.itemUseOn;
   if (itemUseOn) {
     itemUseOn.subscribe((ev) => {
-      if (handleInteraction(ev.source, ev.block)) {
-        ev.cancel = true;
-      }
-    });
-  }
+      const { source: player, block } = ev;
+      if (!player || !block) return;
+      if (!isBoardBlock(block)) return;
 
-  const interact = world.beforeEvents?.playerInteractWithBlock;
-  if (interact) {
-    interact.subscribe((ev) => {
-      if (handleInteraction(ev.player, ev.block)) {
-        ev.cancel = true;
-      }
+      ev.cancel = true;
+      system.run(() => showQuestBoard(player));
     });
+  } else {
+    // Fallback if itemUseOn is not available (API version difference)
+    const interact = world.beforeEvents?.playerInteractWithBlock;
+    if (interact) {
+      interact.subscribe((ev) => {
+        if (isBoardBlock(ev.block)) {
+          ev.cancel = true;
+          system.run(() => showQuestBoard(ev.player));
+        }
+      });
+    }
   }
 
   // Chat fallback
   const chatEvent = world.afterEvents?.chatSend ?? world.beforeEvents?.chatSend;
   if (chatEvent?.subscribe) {
     chatEvent.subscribe((ev) => {
-      if (ev.message === "!builder") {
-        if (typeof ev.cancel === "boolean") ev.cancel = true;
-
-        if (builderModePlayers.has(ev.sender.name)) {
-          builderModePlayers.delete(ev.sender.name);
-          system.run(() => ev.sender.sendMessage("§eBuilder Mode: OFF. Quest Board enabled.§r"));
-        } else {
-          builderModePlayers.add(ev.sender.name);
-          system.run(() => ev.sender.sendMessage("§aBuilder Mode: ON. Quest Board disabled (you can now build).§r"));
-        }
-        return;
-      }
-
       if (ev.message !== FALLBACK_COMMAND) return;
       if (typeof ev.cancel === "boolean") ev.cancel = true;
       system.run(() => showQuestBoard(ev.sender));

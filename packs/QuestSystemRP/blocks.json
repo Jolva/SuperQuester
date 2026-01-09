@@ -1,0 +1,19 @@
+{
+  "format_version": [
+    1,
+    1,
+    0
+  ],
+  "quest:board_available": {
+    "textures": "quest_board_texture",
+    "sound": "wood"
+  },
+  "quest:board_active": {
+    "textures": "quest_board_texture",
+    "sound": "wood"
+  },
+  "quest:board_leaderboard": {
+    "textures": "quest_board_texture",
+    "sound": "wood"
+  }
+}
