@@ -1,0 +1,33 @@
+{
+  "format_version": "1.20.50",
+  "minecraft:block": {
+    "description": {
+      "identifier": "quest:avail_mid"
+    },
+    "components": {
+      "minecraft:geometry": "minecraft:geometry.full_block",
+      "minecraft:material_instances": {
+        "north": {
+          "texture": "txt_avail_mid_front",
+          "render_method": "opaque"
+        },
+        "south": {
+          "texture": "txt_avail_mid_back",
+          "render_method": "opaque"
+        },
+        "up": {
+          "texture": "quest_internal",
+          "render_method": "opaque"
+        },
+        "down": {
+          "texture": "quest_internal",
+          "render_method": "opaque"
+        },
+        "*": {
+          "texture": "txt_avail_mid_side",
+          "render_method": "opaque"
+        }
+      }
+    }
+  }
+}

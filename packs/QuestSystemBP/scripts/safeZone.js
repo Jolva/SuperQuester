@@ -89,8 +89,11 @@ export function registerSafeZoneEvents() {
 
   // 4. Clean up hostile mobs that somehow spawn in
   world.afterEvents.entitySpawn.subscribe((ev) => {
-    const { entity } = ev;
+    const { entity, cause } = ev;
     if (!entity.isValid()) return;
+
+    // Allow manual spawning by admins/testing
+    if (cause === "SpawnEgg" || cause === "Command" || cause === "Override") return;
 
     if (isHostile(entity.typeId) && isInSafeZone(entity.location)) {
       // Remove immediately

@@ -659,9 +659,12 @@ function handleQuestTurnIn(player, questId) {
  *  ----------------------------- */
 
 const BLOCK_TAB_MAP = {
-  "quest:board_available": "available",     // Maps to BOARD_TABS.AVAILABLE
-  "quest:board_active": "active",           // Maps to BOARD_TABS.ACTIVE
-  "quest:board_leaderboard": "leaderboard"  // Maps to BOARD_TABS.LEADERBOARD
+  // Available Column
+  "quest:avail_top": "available", "quest:avail_mid": "available", "quest:avail_bot": "available",
+  // Active Column
+  "quest:active_top": "active", "quest:active_mid": "active", "quest:active_bot": "active",
+  // Leaderboard Column
+  "quest:leader_top": "leaderboard", "quest:leader_mid": "leaderboard", "quest:leader_bot": "leaderboard"
 };
 
 const lastInteractTime = new Map();
@@ -673,6 +676,9 @@ function wireInteractions() {
 
     // Builder Mode check
     if (builderModePlayers.has(player.name)) return false;
+
+    // Sneaking lets you place blocks/interact normally (Bypass UI)
+    if (player.isSneaking) return false;
 
     // Check if it's our block FIRST
     const tab = BLOCK_TAB_MAP[block.typeId];
@@ -707,11 +713,11 @@ function wireInteractions() {
   }
 
   // Chat fallback
-  const chatEvent = world.afterEvents?.chatSend ?? world.beforeEvents?.chatSend;
+  const chatEvent = world.beforeEvents?.chatSend;
   if (chatEvent?.subscribe) {
     chatEvent.subscribe((ev) => {
       if (ev.message === "!builder") {
-        if (typeof ev.cancel === "boolean") ev.cancel = true;
+        ev.cancel = true;
 
         if (builderModePlayers.has(ev.sender.name)) {
           builderModePlayers.delete(ev.sender.name);
@@ -723,9 +729,10 @@ function wireInteractions() {
         return;
       }
 
-      if (ev.message !== FALLBACK_COMMAND) return;
-      if (typeof ev.cancel === "boolean") ev.cancel = true;
-      system.run(() => showQuestBoard(ev.sender));
+      if (ev.message === FALLBACK_COMMAND) {
+        ev.cancel = true;
+        system.run(() => showQuestBoard(ev.sender));
+      }
     });
   }
 }

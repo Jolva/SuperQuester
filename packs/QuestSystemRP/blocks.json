@@ -4,15 +4,39 @@
     1,
     0
   ],
-  "quest:board_available": {
+  "quest:avail_top": {
     "textures": "quest_board_texture",
     "sound": "wood"
   },
-  "quest:board_active": {
+  "quest:avail_mid": {
     "textures": "quest_board_texture",
     "sound": "wood"
   },
-  "quest:board_leaderboard": {
+  "quest:avail_bot": {
+    "textures": "quest_board_texture",
+    "sound": "wood"
+  },
+  "quest:active_top": {
+    "textures": "quest_board_texture",
+    "sound": "wood"
+  },
+  "quest:active_mid": {
+    "textures": "quest_board_texture",
+    "sound": "wood"
+  },
+  "quest:active_bot": {
+    "textures": "quest_board_texture",
+    "sound": "wood"
+  },
+  "quest:leader_top": {
+    "textures": "quest_board_texture",
+    "sound": "wood"
+  },
+  "quest:leader_mid": {
+    "textures": "quest_board_texture",
+    "sound": "wood"
+  },
+  "quest:leader_bot": {
     "textures": "quest_board_texture",
     "sound": "wood"
   }

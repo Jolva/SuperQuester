@@ -1,11 +1,110 @@
 {
-  "resource_pack_name": "QuestSystemRP",
+  "resource_pack_name": "quest_system_rp",
   "texture_name": "atlas.terrain",
   "padding": 8,
   "num_mip_levels": 4,
   "texture_data": {
-    "quest_board_texture": {
-      "textures": "textures/blocks/planks_oak"
+    "quest_internal": {
+      "textures": "textures/blocks/quest_internal"
+    },
+    "txt_avail_top_front": {
+      "textures": "textures/blocks/quest_avail_top_front"
+    },
+    "txt_avail_top_side": {
+      "textures": "textures/blocks/quest_avail_top_side"
+    },
+    "txt_avail_top_back": {
+      "textures": "textures/blocks/quest_avail_top_back"
+    },
+    "txt_avail_top_up": {
+      "textures": "textures/blocks/quest_avail_top_top"
+    },
+    "txt_avail_mid_front": {
+      "textures": "textures/blocks/quest_avail_mid_front"
+    },
+    "txt_avail_mid_side": {
+      "textures": "textures/blocks/quest_avail_mid_side"
+    },
+    "txt_avail_mid_back": {
+      "textures": "textures/blocks/quest_avail_mid_back"
+    },
+    "txt_avail_bot_front": {
+      "textures": "textures/blocks/quest_avail_bot_front"
+    },
+    "txt_avail_bot_side": {
+      "textures": "textures/blocks/quest_avail_bot_side"
+    },
+    "txt_avail_bot_back": {
+      "textures": "textures/blocks/quest_avail_bot_back"
+    },
+    "txt_avail_bot_down": {
+      "textures": "textures/blocks/quest_avail_bot_bottom"
+    },
+    "txt_active_top_front": {
+      "textures": "textures/blocks/quest_active_top_front"
+    },
+    "txt_active_top_side": {
+      "textures": "textures/blocks/quest_internal"
+    },
+    "txt_active_top_back": {
+      "textures": "textures/blocks/quest_active_top_back"
+    },
+    "txt_active_top_up": {
+      "textures": "textures/blocks/quest_active_top_top"
+    },
+    "txt_active_mid_front": {
+      "textures": "textures/blocks/quest_active_mid_front"
+    },
+    "txt_active_mid_side": {
+      "textures": "textures/blocks/quest_internal"
+    },
+    "txt_active_mid_back": {
+      "textures": "textures/blocks/quest_active_mid_back"
+    },
+    "txt_active_bot_front": {
+      "textures": "textures/blocks/quest_active_bot_front"
+    },
+    "txt_active_bot_side": {
+      "textures": "textures/blocks/quest_internal"
+    },
+    "txt_active_bot_back": {
+      "textures": "textures/blocks/quest_active_bot_back"
+    },
+    "txt_active_bot_down": {
+      "textures": "textures/blocks/quest_active_bot_bottom"
+    },
+    "txt_leader_top_front": {
+      "textures": "textures/blocks/quest_legend_top_front"
+    },
+    "txt_leader_top_side": {
+      "textures": "textures/blocks/quest_legend_top_side"
+    },
+    "txt_leader_top_back": {
+      "textures": "textures/blocks/quest_legend_top_back"
+    },
+    "txt_leader_top_up": {
+      "textures": "textures/blocks/quest_legend_top_top"
+    },
+    "txt_leader_mid_front": {
+      "textures": "textures/blocks/quest_legend_mid_front"
+    },
+    "txt_leader_mid_side": {
+      "textures": "textures/blocks/quest_legend_mid_side"
+    },
+    "txt_leader_mid_back": {
+      "textures": "textures/blocks/quest_legend_mid_back"
+    },
+    "txt_leader_bot_front": {
+      "textures": "textures/blocks/quest_legend_bot_front"
+    },
+    "txt_leader_bot_side": {
+      "textures": "textures/blocks/quest_legend_bot_side"
+    },
+    "txt_leader_bot_back": {
+      "textures": "textures/blocks/quest_legend_bot_back"
+    },
+    "txt_leader_bot_down": {
+      "textures": "textures/blocks/quest_legend_bot_bottom"
     }
   }
 }

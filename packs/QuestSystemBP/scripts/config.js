@@ -1,7 +1,7 @@
 export const CONFIG = {
   safeZone: {
-    enabled: false,
-    center: { x: -101, y: 65, z: 290 },
+    enabled: true,
+    center: { x: -152, y: 67, z: 128 },
     radius: 20,
     debug: false, // Set to true to test protection even if you are OP
   },
