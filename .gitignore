@@ -1,5 +1,6 @@
 # Minecraft Bedrock Server - Generated Files
-worlds/
+worlds/*
+!worlds/Super Quester World/
 behavior_packs/
 resource_packs/
 development_behavior_packs/

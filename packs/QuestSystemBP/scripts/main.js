@@ -4,6 +4,7 @@ import { ensureObjective } from "./scoreboard.js";
 import { getMobType } from "./quests/mobTypes.js";
 import { CONFIG } from "./config.js";
 import { registerSafeZoneEvents } from "./safeZone.js";
+import { PersistenceManager } from "./systems/PersistenceManager.js";
 
 /**
  * QuestBoard Add-on — High-Utility UX Refactor
@@ -15,6 +16,23 @@ import { registerSafeZoneEvents } from "./safeZone.js";
 // Log on world load (Kept from original main.js)
 world.afterEvents.worldInitialize.subscribe(() => {
   console.warn('Quest System BP loaded successfully');
+  world.setDefaultSpawnLocation({ x: -319, y: 74, z: 210 });
+});
+
+// Load data when player joins
+world.afterEvents.playerSpawn.subscribe((ev) => {
+  const { player } = ev;
+  const quests = PersistenceManager.loadQuests(player);
+
+  if (quests && quests.length > 0) {
+    activeQuestsByPlayer.set(getPlayerKey(player), quests);
+
+    // Resume HUD if applicable
+    const activeKillQuest = quests.find(q => q.type === "kill" && q.status !== "complete");
+    if (activeKillQuest) {
+      updateKillQuestHud(player, activeKillQuest);
+    }
+  }
 });
 
 /** -----------------------------
@@ -164,6 +182,8 @@ function tryAddQuest(player, questId) {
     updateKillQuestHud(player, newState);
   }
 
+  PersistenceManager.saveQuests(player, quests);
+
   return { ok: true, quest: newState };
 }
 
@@ -195,6 +215,7 @@ function abandonQuest(player, questId) {
   if (index === -1) return null;
 
   const [removed] = quests.splice(index, 1);
+  PersistenceManager.saveQuests(player, quests);
   player.onScreenDisplay?.setActionBar?.("");
   return removed;
 }
@@ -546,6 +567,7 @@ function markQuestComplete(player, questState) {
   questState.status = "complete";
   updateKillQuestHud(player, questState);
   player.sendMessage(`§aQuest Complete: ${questState.title}§r`);
+  PersistenceManager.saveQuests(player, getPlayerQuests(player));
   player.playSound("random.levelup");
   player.dimension.spawnParticle("minecraft:villager_happy", player.location);
 }
@@ -587,6 +609,7 @@ function handleEntityDeath(ev) {
     } else {
       updateKillQuestHud(killer, quest);
     }
+    PersistenceManager.saveQuests(killer, quests);
   }
 }
 
@@ -649,6 +672,7 @@ function handleQuestTurnIn(player, questId) {
   }
 
   quests.splice(index, 1);
+  PersistenceManager.saveQuests(player, quests);
   player.onScreenDisplay?.setActionBar?.("");
   player.sendMessage(`§bRewards claimed for: ${quest.title}§r`);
   player.playSound("random.orb");
