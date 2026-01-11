@@ -84,6 +84,20 @@ function getQuestIcon(def) {
 
 const LEADERBOARD_ENTRY_LIMIT = 10;
 
+// Color Palettes
+function getQuestColors(rarity) {
+  // Returns { chat: "code", button: "code" }
+  switch (rarity) {
+    case "legendary":
+      return { chat: "§6§l", button: "§6" }; // Gold/Gold
+    case "rare":
+      return { chat: "§b", button: "§1" }; // Aqua/Dark Blue (Button)
+    case "common":
+    default:
+      return { chat: "§7", button: "§0" }; // Gray/Black
+  }
+}
+
 /** -----------------------------
  *  State (in-memory)
  *  ----------------------------- */
@@ -139,7 +153,8 @@ function createQuestState(definition) {
     reward: definition.reward,
 
     // Visuals
-    icon: definition.icon // if any
+    icon: definition.icon, // if any
+    rarity: definition.rarity
   };
 }
 
@@ -303,7 +318,9 @@ async function showAvailableTab(player, actions, isStandalone = false) {
   // 2. Content
   for (const def of available) {
     const icon = getQuestIcon(def);
-    form.button(`${def.title}`, icon);
+    const colors = getQuestColors(def.rarity);
+    // Use button-safe color for the form
+    form.button(`${colors.button}${def.title}§r`, icon);
     actions.push({ type: "view_details", questId: def.id, fromStandalone: isStandalone });
   }
 
@@ -339,6 +356,7 @@ async function showActiveTab(player, actions, isStandalone = false) {
     // For ACTIVE quests, the 'quest' object IS the definition (self-contained now).
     // We don't need getQuestDefinition(quest.id) anymore for active quests.
     const icon = getQuestIcon(quest);
+    const colors = getQuestColors(quest.rarity);
 
     if (quest.status === "complete") {
       form.button(`§aTurn In: ${quest.title}§r`, "textures/quest_ui/quest_tab_done.png");
@@ -346,7 +364,8 @@ async function showActiveTab(player, actions, isStandalone = false) {
     } else {
       // Show progress
       const progressStr = quest.goal > 0 ? `${quest.progress}/${quest.goal}` : "In Progress";
-      form.button(`${quest.title}\n§7${progressStr}§r`, icon);
+      // Use §8 (Dark Gray) for subtitle text to be readable on button (light gray background)
+      form.button(`${colors.button}${quest.title}\n§8${progressStr}§r`, icon);
       // Clicking an active quest gives options (Abandon)
       actions.push({ type: "manage", questId: quest.id, fromStandalone: isStandalone });
     }
@@ -460,7 +479,21 @@ async function handleUiAction(player, action) {
       player.sendMessage(result.reason);
     } else {
       const def = getQuestDefinition(action.questId);
-      player.sendMessage(`§aAccepted: ${def.title}§r`);
+      const colors = getQuestColors(def.rarity);
+      player.sendMessage(`§aAccepted: ${colors.chat}${def.title}§r`);
+
+      // FX: Rarity
+      if (def.rarity === "legendary") {
+        player.playSound("random.totem", { pitch: 1.0 });
+        player.playSound("ambient.weather.thunder", { pitch: 0.8 });
+        player.dimension.spawnParticle("minecraft:totem_particle", player.location);
+        player.sendMessage("§6§l[LEGENDARY CONTRACT ACCEPTED]§r");
+      } else if (def.rarity === "rare") {
+        player.playSound("random.levelup", { pitch: 1.5 });
+        player.dimension.spawnParticle("minecraft:villager_happy", player.location);
+      } else {
+        player.playSound("random.orb", { pitch: 1.0 });
+      }
     }
     // Refresh the board, respecting standalone state
     await showQuestBoard(player, BOARD_TABS.AVAILABLE, isStandalone);
@@ -497,10 +530,23 @@ async function showQuestDetails(player, questId, isStandalone = false) {
   }
   if (!rewardsStr) rewardsStr = "\n§7None§r";
 
+  // Rarity Display
+  let rarityText = "§7Tier: COMMON§r";
+  if (def.rarity === "rare") rarityText = "§bTier: RARE§r";
+  if (def.rarity === "legendary") rarityText = "§6§lTier: LEGENDARY§r";
+
+  let warningText = "";
+  if (def.rarity === "legendary") {
+    warningText = "\n\n§c⚠ HIGH VALUE TARGET ⚠§r";
+  }
+
+  const colors = getQuestColors(def.rarity);
+
   const form = new MessageFormData()
     .title("Quest Contract")
     .body(
-      `§6§l${def.title}§r` +
+      `${colors.chat}${def.title}§r` +
+      `\n\n${rarityText}${warningText}` +
       `\n\n§7Difficulty: Normal§r` +
       `\n\n§o"${def.description || "No description provided."}"§r` +
       `\n\n§cOBJECTIVES:§r` +
@@ -560,7 +606,10 @@ async function showManageQuest(player, questId, isStandalone = false) {
 
   if (res.selection === 1) {
     const removed = abandonQuest(player, questId);
-    if (removed) player.sendMessage(`§eAbandoned: ${removed.title}§r`);
+    if (removed) {
+      const colors = getQuestColors(removed.rarity);
+      player.sendMessage(`§eAbandoned: ${colors.chat}${removed.title}§r`);
+    }
     await showQuestBoard(player, BOARD_TABS.ACTIVE, isStandalone);
   }
 }
@@ -622,7 +671,10 @@ function markQuestComplete(player, questState) {
   if (questState.status === "complete") return;
   questState.status = "complete";
   updateQuestHud(player, questState);
-  player.sendMessage(`§aQuest Complete: ${questState.title}§r`);
+
+  const colors = getQuestColors(questState.rarity);
+  player.sendMessage(`§aQuest Complete: ${colors.chat}${questState.title}§r`);
+
   PersistenceManager.saveQuests(player, getPlayerQuests(player));
   player.playSound("random.levelup");
   player.dimension.spawnParticle("minecraft:villager_happy", player.location);

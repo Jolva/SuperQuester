@@ -12,12 +12,48 @@ export class QuestGenerator {
   static generateQuest() {
     // 50/50 chance of Kill vs Gather/Mine
     const isKill = Math.random() < 0.5;
+    let quest;
 
     if (isKill) {
-      return this.generateKillQuest();
+      quest = this.generateKillQuest();
     } else {
-      return this.generateGatherQuest();
+      quest = this.generateGatherQuest();
     }
+
+    // Rarity Logic
+    const roll = Math.random();
+    let rarity = "common";
+    let multiplier = 1;
+    let color = "§7";
+
+    if (roll >= 0.9) {
+      rarity = "legendary";
+      multiplier = 5;
+      color = "§6§l";
+    } else if (roll >= 0.6) {
+      rarity = "rare";
+      multiplier = 2;
+      color = "§b";
+    }
+
+    // Apply Rarity
+    quest.rarity = rarity;
+    // quest.title modifies handled in display layers now
+    // quest.title = `${color}${quest.title}§r`;
+
+    // Multiply Rewards
+    if (quest.reward) {
+      if (quest.reward.scoreboardIncrement) {
+        quest.reward.scoreboardIncrement = Math.ceil(quest.reward.scoreboardIncrement * multiplier);
+      }
+      if (quest.reward.rewardItems) {
+        quest.reward.rewardItems.forEach(item => {
+          item.amount = Math.ceil(item.amount * multiplier);
+        });
+      }
+    }
+
+    return quest;
   }
 
   static generateKillQuest() {
