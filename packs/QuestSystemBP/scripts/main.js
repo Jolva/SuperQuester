@@ -28,9 +28,9 @@ world.afterEvents.playerSpawn.subscribe((ev) => {
     activeQuestsByPlayer.set(getPlayerKey(player), quests);
 
     // Resume HUD if applicable
-    const activeKillQuest = quests.find(q => q.type === "kill" && q.status !== "complete");
-    if (activeKillQuest) {
-      updateKillQuestHud(player, activeKillQuest);
+    const activeQuest = quests.find(q => (q.type === "kill" || q.type === "mine") && q.status !== "complete");
+    if (activeQuest) {
+      updateQuestHud(player, activeQuest);
     }
   }
 });
@@ -81,6 +81,7 @@ const QUEST_DEFINITIONS = {
     title: "Mine 16 coal ore",
     type: "mine",
     requiredCount: 16,
+    targetBlockIds: ["minecraft:coal_ore", "minecraft:deepslate_coal_ore"],
     // icon: TEXTURES.QUEST_MINE, // Auto-assigned
   },
   gather_wood_64: {
@@ -88,6 +89,7 @@ const QUEST_DEFINITIONS = {
     title: "Gather 64 logs",
     type: "gather",
     requiredCount: 64,
+    targetItemIds: ["minecraft:oak_log", "minecraft:spruce_log", "minecraft:birch_log", "minecraft:jungle_log", "minecraft:acacia_log", "minecraft:dark_oak_log", "minecraft:cherry_log", "minecraft:mangrove_log"],
     // icon: TEXTURES.QUEST_GATHER, // Auto-assigned
   },
 };
@@ -178,8 +180,8 @@ function tryAddQuest(player, questId) {
   const newState = createQuestState(questDef);
   quests.push(newState);
 
-  if (questDef.type === "kill") {
-    updateKillQuestHud(player, newState);
+  if (questDef.type === "kill" || questDef.type === "mine") {
+    updateQuestHud(player, newState);
   }
 
   PersistenceManager.saveQuests(player, quests);
@@ -244,9 +246,9 @@ function expireQuestsForPlayer(player) {
     player.sendMessage(`§eQuest expired:§r ${title}`);
   }
 
-  const activeKillQuest = quests.find((q) => q.type === "kill" && q.status !== "complete");
-  if (activeKillQuest) {
-    updateKillQuestHud(player, activeKillQuest);
+  const activeQuest = quests.find((q) => (q.type === "kill" || q.type === "mine") && q.status !== "complete");
+  if (activeQuest) {
+    updateQuestHud(player, activeQuest);
   } else {
     player.onScreenDisplay?.setActionBar?.("");
   }
@@ -552,12 +554,15 @@ function getLeaderboardEntries(player) {
  *  Kill/Event Logic
  *  ----------------------------- */
 
-function updateKillQuestHud(player, questState) {
-  if (questState.type !== "kill" || questState.goal <= 0) return;
-  const remaining = Math.max(questState.goal - questState.progress, 0);
+function updateQuestHud(player, questState) {
   if (questState.status === "complete") {
     player.onScreenDisplay?.setActionBar?.("§aQuest complete! Return to board.§r");
-  } else {
+    return;
+  }
+
+  if (questState.type === "kill" || questState.type === "mine") {
+    if (questState.goal <= 0) return;
+    const remaining = Math.max(questState.goal - questState.progress, 0);
     player.onScreenDisplay?.setActionBar?.(`§bTarget: ${remaining} remaining§r`);
   }
 }
@@ -565,7 +570,7 @@ function updateKillQuestHud(player, questState) {
 function markQuestComplete(player, questState) {
   if (questState.status === "complete") return;
   questState.status = "complete";
-  updateKillQuestHud(player, questState);
+  updateQuestHud(player, questState);
   player.sendMessage(`§aQuest Complete: ${questState.title}§r`);
   PersistenceManager.saveQuests(player, getPlayerQuests(player));
   player.playSound("random.levelup");
@@ -607,9 +612,31 @@ function handleEntityDeath(ev) {
       quest.progress = quest.goal;
       markQuestComplete(killer, quest);
     } else {
-      updateKillQuestHud(killer, quest);
+      updateQuestHud(killer, quest);
     }
     PersistenceManager.saveQuests(killer, quests);
+  }
+}
+
+function handleBlockBreak(ev) {
+  const { player, brokenBlockPermutation } = ev;
+  const quests = getPlayerQuests(player);
+
+  for (const quest of quests) {
+    if (quest.type !== "mine" || quest.status === "complete") continue;
+    const def = getQuestDefinition(quest.id);
+
+    // Check if broken block matches any target ID
+    if (!def.targetBlockIds?.includes(brokenBlockPermutation.type.id)) continue;
+
+    quest.progress += 1;
+    if (quest.progress >= quest.goal) {
+      quest.progress = quest.goal;
+      markQuestComplete(player, quest);
+    } else {
+      updateQuestHud(player, quest);
+    }
+    PersistenceManager.saveQuests(player, quests);
   }
 }
 
@@ -636,6 +663,52 @@ function handleQuestTurnIn(player, questId) {
   }
 
   const def = getQuestDefinition(questId);
+
+  // Check requirements if it's a gather quest
+  if (quest.type === "gather" && def.targetItemIds) {
+    const inventory = player.getComponent("inventory")?.container;
+    if (!inventory) return;
+
+    // 1. Count Total
+    let totalCount = 0;
+    for (let i = 0; i < inventory.size; i++) {
+      const item = inventory.getItem(i);
+      if (item && def.targetItemIds.includes(item.typeId)) {
+        totalCount += item.amount;
+      }
+    }
+
+    if (totalCount < quest.goal) {
+      player.sendMessage(`§cYou need ${quest.goal - totalCount} more items!§r`);
+      return;
+    }
+
+    // 2. Consume Items
+    let remainingToRemove = quest.goal;
+    for (let i = 0; i < inventory.size; i++) {
+      if (remainingToRemove <= 0) break;
+      const item = inventory.getItem(i);
+      if (item && def.targetItemIds.includes(item.typeId)) {
+        if (item.amount <= remainingToRemove) {
+          remainingToRemove -= item.amount;
+          inventory.setItem(i, undefined); // Remove stack
+        } else {
+          item.amount -= remainingToRemove;
+          remainingToRemove = 0;
+          inventory.setItem(i, item); // Update stack
+        }
+      }
+    }
+
+    // Complete the quest state now if it wasn't already (gather quests might not auto-complete on progress)
+    quest.status = "complete";
+  }
+
+  if (quest.status !== "complete") {
+    player.sendMessage("§eCompletion pending...§r");
+    return;
+  }
+
   if (def && def.reward) {
     // 1. Scoreboard (unchanged)
     if (def.reward.scoreboardIncrement) {
@@ -765,6 +838,7 @@ function bootstrap() {
   ensureObjective(SCOREBOARD_OBJECTIVE_ID, "dummy", SCOREBOARD_OBJECTIVE_DISPLAY);
   wireInteractions();
   world.afterEvents.entityDie.subscribe(handleEntityDeath);
+  world.afterEvents.playerBreakBlock.subscribe(handleBlockBreak);
   wireEntityHitTracking();
   registerSafeZoneEvents();
 
