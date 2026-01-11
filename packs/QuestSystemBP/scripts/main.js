@@ -66,6 +66,7 @@ const QUEST_DEFINITIONS = {
     id: "kill_zombies_10",
     title: "Kill 10 zombies",
     type: "kill",
+    description: "The local priest reports strange groanings from the crypts. Put the restless dead back to sleep.",
     requiredCount: 10,
     targets: new Set(["zombie"]),
     // icon: TEXTURES.QUEST_KILL, // Auto-assigned
@@ -79,18 +80,32 @@ const QUEST_DEFINITIONS = {
   mine_coal_16: {
     id: "mine_coal_16",
     title: "Mine 16 coal ore",
+    description: "The blacksmith is running low on fuel for the forge. Retrieve high-quality coal from the depths.",
     type: "mine",
     requiredCount: 16,
     targetBlockIds: ["minecraft:coal_ore", "minecraft:deepslate_coal_ore"],
     // icon: TEXTURES.QUEST_MINE, // Auto-assigned
+    reward: {
+      scoreboardIncrement: 1,
+      rewardItems: [
+        { typeId: "minecraft:coal", amount: 5 }
+      ]
+    },
   },
   gather_wood_64: {
     id: "gather_wood_64",
     title: "Gather 64 logs",
+    description: "Winter is coming, and the town stockpile is empty. We need lumber for repairs and warmth.",
     type: "gather",
     requiredCount: 64,
     targetItemIds: ["minecraft:oak_log", "minecraft:spruce_log", "minecraft:birch_log", "minecraft:jungle_log", "minecraft:acacia_log", "minecraft:dark_oak_log", "minecraft:cherry_log", "minecraft:mangrove_log"],
     // icon: TEXTURES.QUEST_GATHER, // Auto-assigned
+    reward: {
+      scoreboardIncrement: 1,
+      rewardItems: [
+        { typeId: "minecraft:iron_ingot", amount: 8 }
+      ]
+    },
   },
 };
 
@@ -317,8 +332,8 @@ async function showAvailableTab(player, actions, isStandalone = false) {
   // 2. Content
   for (const def of available) {
     const icon = getQuestIcon(def);
-    form.button(`Accept: ${def.title}`, icon);
-    actions.push({ type: "accept", questId: def.id, fromStandalone: isStandalone });
+    form.button(`${def.title}`, icon);
+    actions.push({ type: "view_details", questId: def.id, fromStandalone: isStandalone });
   }
 
   // 3. Close option (always good UX)
@@ -461,6 +476,12 @@ async function handleUiAction(player, action) {
     return;
   }
 
+  if (action.type === "view_details") {
+    // Show new details screen
+    await showQuestDetails(player, action.questId, isStandalone);
+    return;
+  }
+
   if (action.type === "accept") {
     const result = tryAddQuest(player, action.questId);
     if (!result.ok) {
@@ -482,12 +503,68 @@ async function handleUiAction(player, action) {
 
   if (action.type === "manage") {
     // Show management for specific quest (Abandon)
-    await showQuestDetails(player, action.questId, isStandalone);
+    await showManageQuest(player, action.questId, isStandalone);
     return;
   }
 }
 
 async function showQuestDetails(player, questId, isStandalone = false) {
+  const def = getQuestDefinition(questId);
+  if (!def) return;
+
+  // Formatting strings
+  const scoreRaw = def.reward?.scoreboardIncrement || 0;
+  const itemsRaw = def.reward?.rewardItems || [];
+
+  let rewardsStr = "";
+  if (scoreRaw > 0) rewardsStr += `\n§e+${scoreRaw} Town Reputation§r`;
+  for (const item of itemsRaw) {
+    // Attempt to pretty print item name (e.g. minecraft:iron_ingot -> Iron Ingot)
+    const name = item.typeId.replace("minecraft:", "").replace(/_/g, " ");
+    rewardsStr += `\n§b+${item.amount} ${name}§r`;
+  }
+  if (!rewardsStr) rewardsStr = "\n§7None§r";
+
+  const form = new MessageFormData()
+    .title("Quest Contract")
+    .body(
+      `§6§l${def.title}§r` +
+      `\n\n§7Difficulty: Normal§r` +
+      `\n\n§o"${def.description || "No description provided."}"§r` +
+      `\n\n§cOBJECTIVES:§r` +
+      `\n- ${def.title}` +
+      `\n\n§eREWARDS:§r` +
+      rewardsStr
+    )
+    .button1("§lACCEPT CONTRACT§r")
+    .button2("Decline");
+
+  const res = await form.show(player);
+  if (res.canceled || res.selection === 0) {
+    // Selection 1 = Button 1 (Accept) - MessageFormData is 1-based? 
+    // Wait, MessageFormData button1 is selection 1, button2 is selection 0 usually OR based on index?
+    // Docs: button1 => selection 1. button2 => selection 0.
+    // Wait, let's verify standard behavior. usually Yes=1, No=0.
+    // IF button2 (Decline) is clicked, or canceled -> Go back.
+    // Let's assume Button 1 (Accept) is what we want.
+
+    // MessageFormData:
+    // .button1("text") -> returns selection: 1
+    // .button2("text") -> returns selection: 0
+    // So if selection === 1, it's Accept.
+
+    if (res.selection === 1) {
+      // Accept
+      await handleUiAction(player, { type: "accept", questId, fromStandalone: isStandalone });
+      return;
+    }
+
+    // Decline (0) or Cancel
+    await showQuestBoard(player, BOARD_TABS.AVAILABLE, isStandalone);
+  }
+}
+
+async function showManageQuest(player, questId, isStandalone = false) {
   const state = getActiveQuestState(player, questId);
   if (!state) {
     await showQuestBoard(player, BOARD_TABS.ACTIVE, isStandalone);
@@ -710,9 +787,16 @@ function handleQuestTurnIn(player, questId) {
   }
 
   if (def && def.reward) {
-    // 1. Scoreboard (unchanged)
+    // 1. Scoreboard (Script API)
     if (def.reward.scoreboardIncrement) {
-      player.runCommandAsync(`scoreboard players add @s ${SCOREBOARD_OBJECTIVE_ID} ${def.reward.scoreboardIncrement}`).catch(() => { });
+      const objective = world.scoreboard.getObjective(SCOREBOARD_OBJECTIVE_ID);
+      try {
+        if (objective && player.scoreboardIdentity) {
+          objective.addScore(player.scoreboardIdentity, def.reward.scoreboardIncrement);
+        }
+      } catch (e) {
+        console.warn("Failed to update score: " + e);
+      }
     }
 
     // 2. Items (Inventory API)
