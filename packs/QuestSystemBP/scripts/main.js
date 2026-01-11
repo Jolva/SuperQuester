@@ -558,26 +558,15 @@ async function showQuestDetails(player, questId, isStandalone = false) {
     .button2("Decline");
 
   const res = await form.show(player);
-  if (res.canceled || res.selection === 0) {
-    // Selection 1 = Button 1 (Accept) - MessageFormData is 1-based? 
-    // Wait, MessageFormData button1 is selection 1, button2 is selection 0 usually OR based on index?
-    // Docs: button1 => selection 1. button2 => selection 0.
-    // Wait, let's verify standard behavior. usually Yes=1, No=0.
-    // IF button2 (Decline) is clicked, or canceled -> Go back.
-    // Let's assume Button 1 (Accept) is what we want.
 
-    // MessageFormData:
-    // .button1("text") -> returns selection: 1
-    // .button2("text") -> returns selection: 0
-    // So if selection === 1, it's Accept.
+  if (res.selection === 0) {
+    // Accept (Button 1 -> Index 0)
+    await handleUiAction(player, { type: "accept", questId, fromStandalone: isStandalone });
+    return;
+  }
 
-    if (res.selection === 1) {
-      // Accept
-      await handleUiAction(player, { type: "accept", questId, fromStandalone: isStandalone });
-      return;
-    }
-
-    // Decline (0) or Cancel
+  // Decline (Button 2 -> Index 1) or Cancel
+  if (res.canceled || res.selection === 1) {
     await showQuestBoard(player, BOARD_TABS.AVAILABLE, isStandalone);
   }
 }
@@ -595,16 +584,20 @@ async function showManageQuest(player, questId, isStandalone = false) {
   const form = new MessageFormData()
     .title("§cAbandon Quest?")
     .body("Are you sure you want to abandon this quest? Progress will be lost.")
-    .button1("No")
-    .button2("Yes");
+    .button1("Yes")
+    .button2("No");
 
   const res = await form.show(player);
-  if (res.canceled || res.selection === 0) {
+  // Button 1 ("Yes") -> 0
+  // Button 2 ("No") -> 1
+
+  if (res.canceled || res.selection === 1) {
+    // Button 2 (No) -> 1, or Canceled
     await showQuestBoard(player, BOARD_TABS.ACTIVE, isStandalone);
     return;
   }
 
-  if (res.selection === 1) {
+  if (res.selection === 0) {
     const removed = abandonQuest(player, questId);
     if (removed) {
       const colors = getQuestColors(removed.rarity);

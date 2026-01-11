@@ -3,11 +3,11 @@
   "header": {
     "name": "Quest System BP",
     "description": "Behavior pack for Super Quester",
-    "uuid": "7ed2e3bd-42c9-436a-ab7a-a766a53596a0",
+    "uuid": "4f138ff4-e14f-4304-ac68-f5f41e0228e7",
     "version": [
       1,
       0,
-      61
+      78
     ],
     "min_engine_version": [
       1,
@@ -19,11 +19,11 @@
     {
       "type": "script",
       "language": "javascript",
-      "uuid": "40def0d5-da7c-4e0a-9aa8-23ca5f6c7488",
+      "uuid": "34357c81-a89a-4070-98b5-a1dfd9be6431",
       "version": [
         1,
         0,
-        61
+        78
       ],
       "entry": "scripts/main.js"
     }
@@ -31,7 +31,7 @@
   "dependencies": [
     {
       "module_name": "@minecraft/server",
-      "version": "1.17.0"
+      "version": "1.13.0"
     },
     {
       "module_name": "@minecraft/server-ui",

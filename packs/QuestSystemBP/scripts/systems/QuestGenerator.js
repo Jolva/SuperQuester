@@ -3,8 +3,27 @@ import { MOB_POOL, ITEM_POOL, LORE_TEMPLATES } from "../data/QuestData.js";
 export class QuestGenerator {
   static generateDailyQuests(count = 3) {
     const quests = [];
+    const usedTargets = new Set();
+
     for (let i = 0; i < count; i++) {
-      quests.push(this.generateQuest());
+      let quest;
+      let targetId = null;
+      let attempts = 0;
+
+      do {
+        quest = this.generateQuest();
+        // Identify the core target of this quest to prevent duplicates
+        // For kill quests: targetMobId
+        // For gather/mine quests: targetItemIds (use the first one)
+        targetId = quest.targetMobId || (quest.targetItemIds && quest.targetItemIds.length > 0 ? quest.targetItemIds[0] : null);
+
+        attempts++;
+      } while (targetId && usedTargets.has(targetId) && attempts < 10);
+
+      if (targetId) {
+        usedTargets.add(targetId);
+      }
+      quests.push(quest);
     }
     return quests;
   }
