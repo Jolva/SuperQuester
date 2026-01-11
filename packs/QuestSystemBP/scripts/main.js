@@ -5,6 +5,8 @@ import { getMobType } from "./quests/mobTypes.js";
 import { CONFIG } from "./config.js";
 import { registerSafeZoneEvents } from "./safeZone.js";
 import { PersistenceManager } from "./systems/PersistenceManager.js";
+import { QuestGenerator } from "./systems/QuestGenerator.js";
+import { AtmosphereManager } from "./systems/AtmosphereManager.js";
 
 /**
  * QuestBoard Add-on — High-Utility UX Refactor
@@ -35,6 +37,10 @@ world.afterEvents.playerSpawn.subscribe((ev) => {
   }
 });
 
+// Initialize Daily Quests (V1: On Server Start / Reload)
+let currentAvailableQuests = QuestGenerator.generateDailyQuests(3);
+console.warn(`[QuestSystem] Generated ${currentAvailableQuests.length} daily quests.`);
+
 /** -----------------------------
  *  Config
  *  ----------------------------- */
@@ -58,58 +64,8 @@ const TEXTURES = {
   DEFAULT: "textures/items/book_writable",
 };
 
-/**
- * Quest definitions.
- */
-const QUEST_DEFINITIONS = {
-  kill_zombies_10: {
-    id: "kill_zombies_10",
-    title: "Kill 10 zombies",
-    type: "kill",
-    description: "The local priest reports strange groanings from the crypts. Put the restless dead back to sleep.",
-    requiredCount: 10,
-    targets: new Set(["zombie"]),
-    // icon: TEXTURES.QUEST_KILL, // Auto-assigned
-    reward: {
-      scoreboardIncrement: 1,
-      rewardItems: [
-        { typeId: "minecraft:diamond", amount: 3 }
-      ]
-    },
-  },
-  mine_coal_16: {
-    id: "mine_coal_16",
-    title: "Mine 16 coal ore",
-    description: "The blacksmith is running low on fuel for the forge. Retrieve high-quality coal from the depths.",
-    type: "mine",
-    requiredCount: 16,
-    targetBlockIds: ["minecraft:coal_ore", "minecraft:deepslate_coal_ore"],
-    // icon: TEXTURES.QUEST_MINE, // Auto-assigned
-    reward: {
-      scoreboardIncrement: 1,
-      rewardItems: [
-        { typeId: "minecraft:coal", amount: 5 }
-      ]
-    },
-  },
-  gather_wood_64: {
-    id: "gather_wood_64",
-    title: "Gather 64 logs",
-    description: "Winter is coming, and the town stockpile is empty. We need lumber for repairs and warmth.",
-    type: "gather",
-    requiredCount: 64,
-    targetItemIds: ["minecraft:oak_log", "minecraft:spruce_log", "minecraft:birch_log", "minecraft:jungle_log", "minecraft:acacia_log", "minecraft:dark_oak_log", "minecraft:cherry_log", "minecraft:mangrove_log"],
-    // icon: TEXTURES.QUEST_GATHER, // Auto-assigned
-    reward: {
-      scoreboardIncrement: 1,
-      rewardItems: [
-        { typeId: "minecraft:iron_ingot", amount: 8 }
-      ]
-    },
-  },
-};
-
-const QUEST_POOL = Object.values(QUEST_DEFINITIONS);
+// Replaces static QUEST_DEFINITIONS logic
+// const QUEST_POOL = Object.values(QUEST_DEFINITIONS);
 
 const BOARD_TABS = {
   AVAILABLE: "available",
@@ -157,18 +113,33 @@ function getPlayerQuests(player) {
 }
 
 function getQuestDefinition(questId) {
-  return QUEST_DEFINITIONS[questId];
+  // Try to find in current daily rotation
+  return currentAvailableQuests.find(q => q.id === questId);
 }
 
 function createQuestState(definition) {
+  // Snapshot ALL definition data so the quest is self-contained and persists even if definition invalidates
   return {
     id: definition.id,
     title: definition.title,
+    description: definition.description,
     type: definition.type,
     goal: definition.requiredCount ?? 0,
     progress: 0,
     status: "active",
     acceptedAtMs: Date.now(),
+
+    // Core Logic Data
+    targets: definition.targets ? Array.from(definition.targets) : undefined, // Persist Set as Array
+    targetBlockIds: definition.targetBlockIds,
+    targetItemIds: definition.targetItemIds,
+    targetMobId: definition.targetMobId,
+
+    // Reward Data
+    reward: definition.reward,
+
+    // Visuals
+    icon: definition.icon // if any
   };
 }
 
@@ -276,7 +247,7 @@ function expireQuestsForPlayer(player) {
 function getAvailableQuestDefinitions(player) {
   const quests = getPlayerQuests(player);
   const activeIds = new Set(quests.map((quest) => quest.id));
-  return QUEST_POOL.filter((def) => !activeIds.has(def.id));
+  return currentAvailableQuests.filter((def) => !activeIds.has(def.id));
 }
 
 function getMyQuests(player) {
@@ -365,8 +336,9 @@ async function showActiveTab(player, actions, isStandalone = false) {
 
   // 2. Content
   for (const quest of myQuests) {
-    const def = getQuestDefinition(quest.id);
-    const icon = def ? getQuestIcon(def) : TEXTURES.DEFAULT;
+    // For ACTIVE quests, the 'quest' object IS the definition (self-contained now).
+    // We don't need getQuestDefinition(quest.id) anymore for active quests.
+    const icon = getQuestIcon(quest);
 
     if (quest.status === "complete") {
       form.button(`§aTurn In: ${quest.title}§r`, "textures/quest_ui/quest_tab_done.png");
@@ -571,7 +543,9 @@ async function showManageQuest(player, questId, isStandalone = false) {
     return;
   }
 
-  const def = getQuestDefinition(questId);
+  // For Active Quests, 'state' contains all info. We don't use 'def' anymore.
+  // const def = getQuestDefinition(questId); (Removed)
+
   const form = new MessageFormData()
     .title("§cAbandon Quest?")
     .body("Are you sure you want to abandon this quest? Progress will be lost.")
@@ -681,8 +655,15 @@ function handleEntityDeath(ev) {
   const quests = getPlayerQuests(killer);
   for (const quest of quests) {
     if (quest.type !== "kill" || quest.status === "complete") continue;
-    const def = getQuestDefinition(quest.id);
-    if (!def.targets?.has(mobType)) continue;
+
+    // Self-contained check:
+    // quest.targets (Array of strings from Set persistence)
+    // or quest.targets (Set if live, but we persist as array usually. Let's handle both or ensure array).
+    // In createQuestState we did: targets: Array.from(definition.targets)
+
+    const targets = Array.isArray(quest.targets) ? new Set(quest.targets) : quest.targets;
+
+    if (!targets?.has(mobType)) continue;
 
     quest.progress += 1;
     if (quest.progress >= quest.goal) {
@@ -701,10 +682,10 @@ function handleBlockBreak(ev) {
 
   for (const quest of quests) {
     if (quest.type !== "mine" || quest.status === "complete") continue;
-    const def = getQuestDefinition(quest.id);
 
-    // Check if broken block matches any target ID
-    if (!def.targetBlockIds?.includes(brokenBlockPermutation.type.id)) continue;
+    // Self-contained check
+    // quest.targetBlockIds is on the object now
+    if (!quest.targetBlockIds?.includes(brokenBlockPermutation.type.id)) continue;
 
     quest.progress += 1;
     if (quest.progress >= quest.goal) {
@@ -739,10 +720,11 @@ function handleQuestTurnIn(player, questId) {
     return;
   }
 
-  const def = getQuestDefinition(questId);
+  // Self-contained data
+  const reward = quest.reward; // Was definition.reward
 
   // Check requirements if it's a gather quest
-  if (quest.type === "gather" && def.targetItemIds) {
+  if (quest.type === "gather" && quest.targetItemIds) {
     const inventory = player.getComponent("inventory")?.container;
     if (!inventory) return;
 
@@ -750,7 +732,7 @@ function handleQuestTurnIn(player, questId) {
     let totalCount = 0;
     for (let i = 0; i < inventory.size; i++) {
       const item = inventory.getItem(i);
-      if (item && def.targetItemIds.includes(item.typeId)) {
+      if (item && quest.targetItemIds.includes(item.typeId)) {
         totalCount += item.amount;
       }
     }
@@ -765,7 +747,7 @@ function handleQuestTurnIn(player, questId) {
     for (let i = 0; i < inventory.size; i++) {
       if (remainingToRemove <= 0) break;
       const item = inventory.getItem(i);
-      if (item && def.targetItemIds.includes(item.typeId)) {
+      if (item && quest.targetItemIds.includes(item.typeId)) {
         if (item.amount <= remainingToRemove) {
           remainingToRemove -= item.amount;
           inventory.setItem(i, undefined); // Remove stack
@@ -786,54 +768,71 @@ function handleQuestTurnIn(player, questId) {
     return;
   }
 
-  if (def && def.reward) {
+  if (reward) {
     // 1. Scoreboard (Script API)
-    if (def.reward.scoreboardIncrement) {
+    if (reward.scoreboardIncrement) {
       const objective = world.scoreboard.getObjective(SCOREBOARD_OBJECTIVE_ID);
       try {
         if (objective && player.scoreboardIdentity) {
-          objective.addScore(player.scoreboardIdentity, def.reward.scoreboardIncrement);
+          objective.addScore(player.scoreboardIdentity, reward.scoreboardIncrement);
         }
       } catch (e) {
         console.warn("Failed to update score: " + e);
       }
     }
 
-    // 2. Items (Inventory API)
-    if (def.reward.rewardItems) {
+    // 2. Items
+    if (reward.rewardItems) {
       const inventory = player.getComponent("inventory")?.container;
-      for (const itemDef of def.reward.rewardItems) {
-        try {
-          const itemStack = new ItemStack(itemDef.typeId, itemDef.amount);
-          if (inventory) {
-            const remainder = inventory.addItem(itemStack);
-            // If there's a remainder (inventory full), spawn it
-            if (remainder) {
-              player.dimension.spawnItem(remainder, player.location);
-              player.sendMessage("§eInventory full. Reward dropped at your feet.§r");
-            }
-          } else {
-            // Fallback if no inventory component
-            player.dimension.spawnItem(itemStack, player.location);
-          }
-        } catch (e) {
-          console.warn(`Failed to give reward: ${e}`);
-          // Last resort fallback
+      if (inventory) {
+        for (const rItem of reward.rewardItems) {
           try {
-            const itemStack = new ItemStack(itemDef.typeId, itemDef.amount);
-            player.dimension.spawnItem(itemStack, player.location);
-          } catch (e2) { }
+            const itemStack = new ItemStack(rItem.typeId, rItem.amount);
+            inventory.addItem(itemStack);
+            player.sendMessage(`§aReceived Reward: ${rItem.amount}x ${rItem.typeId.replace("minecraft:", "")}§r`);
+          } catch (e) {
+            console.warn("Error giving reward: " + e);
+            player.sendMessage(`§cInv full or error giving reward: ${rItem.typeId}§r`);
+          }
         }
       }
     }
   }
 
-  quests.splice(index, 1);
+  player.sendMessage(`§aQuest Complete: ${quest.title}§r`);
   PersistenceManager.saveQuests(player, quests);
-  player.onScreenDisplay?.setActionBar?.("");
-  player.sendMessage(`§bRewards claimed for: ${quest.title}§r`);
-  player.playSound("random.orb");
+  player.playSound("random.levelup");
+  player.dimension.spawnParticle("minecraft:villager_happy", player.location);
+
+  // Clean up if we want them to stay in "Completed" state or remove them?
+  // Current logic: It stays 'complete' in the list until expired or manually removed?
+  // Wait, if we just set it to complete, it stays in the list.
+  // The original handleQuestTurnInLogic had:
+  // quest.status = "complete" -> Then save.
+  // Then the 'expireQuestsForPlayer' removes it eventually? Or it stays in "Active" tab as "Turn In"?
+  // Wait, if it's "Active" tab, we show "Turn In" button only if status is "complete"?
+  // Ah, the logic in handleQuestTurnIn is triggered BY the "Turn In" button.
+  // So once we do this logic, we should probably REMOVE it from the list or mark it "Archived"?
+  // Original logic:
+  // It marked it complete.
+  // But wait, the "Turn In" button in `showActiveTab` calls `handleQuestTurnIn`.
+  // If `handleQuestTurnIn` just marks it complete AGAIN, that's a loop.
+  // Look at original logic. It checked `if (def && def.reward)`. Then it did rewards.
+  // Then what? It didn't remove it from the array.
+  // `markQuestComplete` sets status to 'complete'.
+  // `handleQuestTurnIn` is called when player clicks "Turn In" (which appears when status IS complete).
+  // So this function is actually "Claim Rewards".
+  // After claiming rewards, we should REMOVE the quest.
+
+  // FIX: Remove quest after claiming rewards in turn-in.
+  const removeIdx = quests.findIndex(q => q.id === questId);
+  if (removeIdx !== -1) {
+    quests.splice(removeIdx, 1);
+    PersistenceManager.saveQuests(player, quests);
+  }
 }
+
+
 
 /** -----------------------------
  *  Interaction & Wiring
@@ -871,6 +870,17 @@ function wireInteractions() {
     if (now - lastTime < 500) return true; // Blocked (ignored) but return true to say "handled/cancel"
     lastInteractTime.set(player.name, now);
 
+    // Save Board Location and Trigger Atmosphere
+    if (!world.getDynamicProperty("superquester:board_location") || player.isSneaking) {
+      world.setDynamicProperty("superquester:board_location", JSON.stringify(block.location));
+    }
+
+    // Trigger the "Pitch Black" effect (Defer to next tick to avoid Restricted Execution error)
+    system.run(() => {
+      try {
+        AtmosphereManager.trigger(player);
+      } catch (e) { console.warn("Atmos error: " + e); }
+    });
     system.run(() => showQuestBoard(player, tab, true)); // true = standalone
     return true;
   };
@@ -925,6 +935,7 @@ function bootstrap() {
   world.afterEvents.playerBreakBlock.subscribe(handleBlockBreak);
   wireEntityHitTracking();
   registerSafeZoneEvents();
+  AtmosphereManager.init();
 
   system.runInterval(() => {
     const now = Date.now();
