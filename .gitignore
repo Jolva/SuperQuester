@@ -1,6 +1,9 @@
 # Minecraft Bedrock Server - Generated Files
 worlds/*
 !worlds/Super Quester World/
+# Ignore copied packs inside the world (avoid duplication)
+worlds/Super Quester World/behavior_packs/
+worlds/Super Quester World/resource_packs/
 behavior_packs/
 resource_packs/
 development_behavior_packs/
