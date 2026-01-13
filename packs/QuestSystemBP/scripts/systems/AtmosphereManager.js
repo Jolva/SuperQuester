@@ -2,40 +2,17 @@ import { system, world } from "@minecraft/server";
 
 export class AtmosphereManager {
   static init() {
-    // Run every 4 ticks (0.2 seconds) for rapid updates
+    // Run every 10 ticks (0.5 seconds)
     system.runInterval(() => {
       this.tick();
-    }, 4);
-
-    // Initial Cleanup
-    system.run(() => {
-      for (const player of world.getPlayers()) {
-        player.removeTag("superquester:atmos_active");
-      }
-    });
-  }
-
-  /**
-   * Triggered when a player specifically interacts with the board
-   */
-  static trigger(player) {
-    if (!player) return;
-
-    player.addTag("superquester:atmos_active");
-    player.playSound("ambient.cave", { volume: 1.0, pitch: 0.5 });
+    }, 10);
   }
 
   static tick() {
-    const locationJson = world.getDynamicProperty("superquester:board_location");
-    if (!locationJson) return;
-
-    let boardLoc;
-    try {
-      boardLoc = JSON.parse(locationJson);
-    } catch (e) { return; }
+    // Hardcoded Quest Board Location
+    const boardLoc = { x: 71, y: 78, z: -278 };
 
     for (const player of world.getPlayers()) {
-      if (!player.hasTag("superquester:atmos_active")) continue;
       if (!player.location) continue;
 
       const dx = player.location.x - boardLoc.x;
@@ -43,24 +20,35 @@ export class AtmosphereManager {
       const dz = player.location.z - boardLoc.z;
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
-      // EXIT CONDITION: If they move more than 8 blocks away (Tightened from 10)
-      if (dist > 8) {
-        player.removeTag("superquester:atmos_active");
-        player.runCommand("effect @s clear");
-        player.playSound("random.orb", { volume: 0.5, pitch: 1.5 });
-        continue;
-      }
+      // The "Ascension" Zone (Distance < 10 blocks)
+      if (dist < 10) {
+        // --- VISUALS ---
+        // REMOVED: Blindness (This was causing the black screen).
+        // REMOVED: Darkness.
 
-      // ACTIVE CONDITION: Within 8 blocks
-      // Base: Pitch Black
-      player.addEffect("blindness", 40, { amplifier: 0, showParticles: false });
-      player.addEffect("darkness", 40, { amplifier: 0, showParticles: false });
+        // KEEP: Night Vision (200 ticks = 10s) -> Makes it bright and clear.
+        player.addEffect("night_vision", 200, { amplifier: 0, showParticles: false });
 
-      // Strobe Light: "Blink 200% Faster"
-      // Every 8 ticks, flash Night Vision for 2 ticks.
-      // This creates a disorienting lightning/strobe effect in the dark.
-      if (system.currentTick % 8 < 2) {
-        player.addEffect("night_vision", 2, { amplifier: 0, showParticles: false });
+        // KEEP: Slow Falling -> Adds the floaty "Holy" weightlessness.
+        player.addEffect("slow_falling", 200, { amplifier: 0, showParticles: false });
+
+        // --- PARTICLES ---
+        // White sparkles (end_rod).
+        // Added +0.5 to center them in the block.
+        player.dimension.spawnParticle("minecraft:end_rod", {
+          x: boardLoc.x + 0.5,
+          y: boardLoc.y + 1.5,
+          z: boardLoc.z + 0.5
+        });
+
+        // --- AUDIO ---
+        // Base Hum
+        player.playSound("beacon.ambient", { volume: 1.5, pitch: 1.0 });
+
+        // Accent Chime (Once per second -> Every 20 ticks)
+        if (system.currentTick % 20 === 0) {
+          player.playSound("conduit.activate", { volume: 0.5, pitch: 1.5 });
+        }
       }
     }
   }

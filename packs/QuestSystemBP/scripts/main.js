@@ -653,10 +653,14 @@ function updateQuestHud(player, questState) {
     return;
   }
 
-  if (questState.type === "kill" || questState.type === "mine") {
+  if (questState.type === "kill" || questState.type === "mine" || questState.type === "gather") {
     if (questState.goal <= 0) return;
     const remaining = Math.max(questState.goal - questState.progress, 0);
-    player.onScreenDisplay?.setActionBar?.(`§bTarget: ${remaining} remaining§r`);
+    let icon = "⚔️";
+    if (questState.type === "mine") icon = "⛏️";
+    if (questState.type === "gather") icon = "🎒";
+
+    player.onScreenDisplay?.setActionBar?.(`§b${icon} ${questState.title}: ${questState.progress}/${questState.goal}§r`);
   }
 }
 
@@ -677,11 +681,12 @@ function handleEntityDeath(ev) {
   const { damageSource, deadEntity } = ev;
   if (!deadEntity) return;
 
-  const mobType = getMobType(deadEntity);
-  if (!mobType) {
-    lastHitPlayerByEntityId.delete(deadEntity.id);
-    return;
-  }
+  // 1. Determine Identity
+  const fullId = deadEntity.typeId; // e.g. "minecraft:skeleton"
+  const simpleId = fullId.replace("minecraft:", ""); // e.g. "skeleton"
+  const mobType = getMobType(deadEntity); // e.g. "zombie" (canonical) or undefined
+
+  console.warn(`[DEBUG] Entity Died: ${fullId} (Simple: ${simpleId}, Mapped: ${mobType})`);
 
   let killer = damageSource?.damagingEntity;
 
@@ -701,16 +706,25 @@ function handleEntityDeath(ev) {
   for (const quest of quests) {
     if (quest.type !== "kill" || quest.status === "complete") continue;
 
-    // Self-contained check:
-    // quest.targets (Array of strings from Set persistence)
-    // or quest.targets (Set if live, but we persist as array usually. Let's handle both or ensure array).
-    // In createQuestState we did: targets: Array.from(definition.targets)
-
+    // Support Set or Array from persistence
     const targets = Array.isArray(quest.targets) ? new Set(quest.targets) : quest.targets;
 
-    if (!targets?.has(mobType)) continue;
+    // Debug Log for verification
+    if (targets) {
+      console.warn(`[DEBUG] Checking Quest: "${quest.title}" Targets: ${JSON.stringify(Array.from(targets))}`);
+    }
+
+    // 2. Check Match (Robust)
+    let match = false;
+    if (targets && targets.has(fullId)) match = true;
+    if (targets && targets.has(simpleId)) match = true;
+    if (targets && mobType && targets.has(mobType)) match = true;
+
+    if (!match) continue;
 
     quest.progress += 1;
+    console.warn(`[DEBUG] Progress Update: ${quest.progress}/${quest.goal}`);
+
     if (quest.progress >= quest.goal) {
       quest.progress = quest.goal;
       markQuestComplete(killer, quest);
@@ -728,11 +742,19 @@ function handleBlockBreak(ev) {
   for (const quest of quests) {
     if (quest.type !== "mine" || quest.status === "complete") continue;
 
+    const blockId = brokenBlockPermutation.type.id;
+    // Debug Log
+    if (quest.targetBlockIds) {
+      console.warn(`[DEBUG] Mine Event: ${blockId} | Checking Quest: "${quest.title}" Targets: ${JSON.stringify(quest.targetBlockIds)}`);
+    }
+
     // Self-contained check
     // quest.targetBlockIds is on the object now
-    if (!quest.targetBlockIds?.includes(brokenBlockPermutation.type.id)) continue;
+    if (!quest.targetBlockIds?.includes(blockId)) continue;
 
     quest.progress += 1;
+    console.warn(`[DEBUG] Mine Progress: ${quest.progress}/${quest.goal}`);
+
     if (quest.progress >= quest.goal) {
       quest.progress = quest.goal;
       markQuestComplete(player, quest);
@@ -775,10 +797,17 @@ function handleQuestTurnIn(player, questId) {
 
     // 1. Count Total
     let totalCount = 0;
+
+    console.warn(`[DEBUG] Turn In Scan: Looking for ${JSON.stringify(quest.targetItemIds)}`);
+
     for (let i = 0; i < inventory.size; i++) {
       const item = inventory.getItem(i);
-      if (item && quest.targetItemIds.includes(item.typeId)) {
-        totalCount += item.amount;
+      if (item) {
+        // console.warn(`[DEBUG] Slot ${i}: ${item.typeId} x${item.amount}`);
+        if (quest.targetItemIds.includes(item.typeId)) {
+          totalCount += item.amount;
+          console.warn(`[DEBUG] MATCH! Found ${item.amount} of ${item.typeId}`);
+        }
       }
     }
 
@@ -988,6 +1017,65 @@ function bootstrap() {
       if (now - data.time > 30000) lastHitPlayerByEntityId.delete(id);
     }
   }, 100);
+
+  // Quest Loop: Inventory Monitor & Persistent HUD (Every 20 ticks / 1 second)
+  system.runInterval(() => {
+    for (const player of world.getPlayers()) {
+      const quests = getPlayerQuests(player);
+      let changed = false;
+      let hudQuest = null;
+
+      for (const quest of quests) {
+        // 1. Gather Logic (Active only)
+        if (quest.status === "active" && quest.type === "gather" && quest.targetItemIds) {
+          const inventory = player.getComponent("inventory")?.container;
+          if (inventory) {
+            let count = 0;
+            for (let i = 0; i < inventory.size; i++) {
+              const item = inventory.getItem(i);
+              if (item && quest.targetItemIds.includes(item.typeId)) count += item.amount;
+            }
+            if (quest.progress !== count) {
+              quest.progress = count;
+              changed = true;
+
+              // If goal met, mark complete
+              if (quest.progress >= quest.goal) {
+                markQuestComplete(player, quest);
+                // markQuestComplete saves, so we can reset changed to avoid double save (though harmless)
+                changed = false;
+              }
+            }
+          }
+        }
+
+        // 2. HUD Priority Determination
+        // Priority A: Any Completed Quest (Show "Return to Board")
+        if (quest.status === "complete") {
+          hudQuest = quest;
+          // We prioritize 'Complete' over 'Active', so we can overwrite any previously found active quest
+        }
+        // Priority B: Active Quest (Show Progress)
+        else if (quest.status === "active" && !hudQuest) {
+          // Only pick this if we haven't found a completed quest yet
+          // (And if we haven't found another active one? First active one wins for now)
+          hudQuest = quest;
+        }
+        // Note: If we found a completed quest, we keep it as hudQuest and ignore subsequent active ones.
+        // If we find ANOTHER completed quest, it overrides the previous completed one (Last finished wins).
+      }
+
+      // 3. Update HUD
+      if (hudQuest) {
+        updateQuestHud(player, hudQuest);
+      }
+
+      // 4. Persist Changes
+      if (changed) {
+        PersistenceManager.saveQuests(player, quests);
+      }
+    }
+  }, 20);
 }
 
 bootstrap();

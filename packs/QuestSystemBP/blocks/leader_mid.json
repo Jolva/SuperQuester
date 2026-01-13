@@ -7,11 +7,11 @@
     "components": {
       "minecraft:geometry": "minecraft:geometry.full_block",
       "minecraft:material_instances": {
-        "north": {
+        "east": {
           "texture": "txt_leader_mid_front",
           "render_method": "opaque"
         },
-        "south": {
+        "west": {
           "texture": "txt_leader_mid_back",
           "render_method": "opaque"
         },
