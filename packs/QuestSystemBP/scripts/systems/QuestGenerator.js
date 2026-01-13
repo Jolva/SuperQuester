@@ -92,7 +92,7 @@ export class QuestGenerator {
       description: lore,
       type: "kill",
       requiredCount: count,
-      targets: new Set([target.id.replace("minecraft:", "")]), // Simple ID for mob types logic if needed, or full ID
+      targets: [target.id.replace("minecraft:", "")], // Store as Array for JSON persistence
       // Note: mobTypes.js might expect simple IDs (e.g. "zombie") or full IDs. 
       // Main.js usually checks `getMobType` result. Let's ensure compatibility.
       // Current main.js uses `targets: new Set(["zombie"])`.

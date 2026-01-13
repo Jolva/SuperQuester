@@ -37,16 +37,16 @@ world.afterEvents.playerSpawn.subscribe((ev) => {
   }
 });
 
-// Initialize Daily Quests (V1: On Server Start / Reload)
-let currentAvailableQuests = QuestGenerator.generateDailyQuests(3);
-console.warn(`[QuestSystem] Generated ${currentAvailableQuests.length} daily quests.`);
+// Initialize Daily Quests (Global Daily Quests - REMOVED)
+// let currentAvailableQuests = QuestGenerator.generateDailyQuests(3);
 
 /** -----------------------------
  *  Config
  *  ----------------------------- */
 
-const MAX_ACTIVE_QUESTS = 2;
+// const MAX_ACTIVE_QUESTS = 2; // REMOVED
 const FALLBACK_COMMAND = "!quests";
+const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 
 const SCOREBOARD_OBJECTIVE_ID = "TownQuests";
 const SCOREBOARD_OBJECTIVE_DISPLAY = "Town Quests";
@@ -63,9 +63,6 @@ const TEXTURES = {
   QUEST_GATHER: "textures/quest_ui/cat_mine.png",
   DEFAULT: "textures/items/book_writable",
 };
-
-// Replaces static QUEST_DEFINITIONS logic
-// const QUEST_POOL = Object.values(QUEST_DEFINITIONS);
 
 const BOARD_TABS = {
   AVAILABLE: "available",
@@ -120,74 +117,221 @@ function getPlayerKey(player) {
   return player.name;
 }
 
-function getPlayerQuests(player) {
-  const key = getPlayerKey(player);
-  if (!activeQuestsByPlayer.has(key)) activeQuestsByPlayer.set(key, []);
-  return activeQuestsByPlayer.get(key);
-}
+/**
+ * Ensures player has valid quest data, creating or refreshing as needed.
+ * Call this before any quest system access.
+ * @param {import("@minecraft/server").Player} player
+ * @returns {QuestData}
+ */
+function ensureQuestData(player) {
+  // Try new format first
+  let data = PersistenceManager.loadQuestData(player);
 
-function getQuestDefinition(questId) {
-  // Try to find in current daily rotation
-  return currentAvailableQuests.find(q => q.id === questId);
-}
+  if (!data) {
+    // Check for old format
+    const oldQuests = PersistenceManager.loadQuests(player);  // Old method
 
-function createQuestState(definition) {
-  // Snapshot ALL definition data so the quest is self-contained and persists even if definition invalidates
-  return {
-    id: definition.id,
-    title: definition.title,
-    description: definition.description,
-    type: definition.type,
-    goal: definition.requiredCount ?? 0,
-    progress: 0,
-    status: "active",
-    acceptedAtMs: Date.now(),
+    if (oldQuests && oldQuests.length > 0) {
+      // MIGRATE: Convert old format to new
+      data = {
+        available: QuestGenerator.generateDailyQuests(3),
+        active: oldQuests[0] || null,  // Take first old quest as active
+        progress: oldQuests[0]?.progress || 0,
+        lastRefreshTime: Date.now(),
+        freeRerollAvailable: true,
+        paidRerollsThisCycle: 0,
+        lifetimeCompleted: 0,
+        lifetimeSPEarned: 0
+      };
 
-    // Core Logic Data
-    targets: definition.targets ? Array.from(definition.targets) : undefined, // Persist Set as Array
-    targetBlockIds: definition.targetBlockIds,
-    targetItemIds: definition.targetItemIds,
-    targetMobId: definition.targetMobId,
+      // Clear old data
+      PersistenceManager.wipeData(player);
+      PersistenceManager.saveQuestData(player, data);
 
-    // Reward Data
-    reward: definition.reward,
+      player.sendMessage("§e⚡ Quest system upgraded! Your progress has been preserved.§r");
+    } else {
+      // Truly new player — create fresh
+      data = {
+        available: QuestGenerator.generateDailyQuests(3),
+        active: null,
+        progress: 0,
+        lastRefreshTime: Date.now(),
+        freeRerollAvailable: true,  // Start with 1 free reroll
+        paidRerollsThisCycle: 0,
+        lifetimeCompleted: 0,
+        lifetimeSPEarned: 0
+      };
 
-    // Visuals
-    icon: definition.icon, // if any
-    rarity: definition.rarity
-  };
-}
-
-function getActiveQuestState(player, questId) {
-  return getPlayerQuests(player).find((q) => q.id === questId);
-}
-
-function tryAddQuest(player, questId) {
-  const questDef = getQuestDefinition(questId);
-  if (!questDef) {
-    return { ok: false, reason: "§cThat quest is unavailable.§r" };
+      PersistenceManager.saveQuestData(player, data);
+      console.warn(`[QuestSystem] Initialized quest data for ${player.name}`);
+    }
+    return data;
   }
 
-  const quests = getPlayerQuests(player);
+  // CASE 2: Existing player — check 24h expiry
+  const hoursSinceRefresh = Date.now() - data.lastRefreshTime;
 
-  if (quests.length >= MAX_ACTIVE_QUESTS) {
-    return { ok: false, reason: `§cYou can only take up to ${MAX_ACTIVE_QUESTS} quests at a time.§r` };
+  if (hoursSinceRefresh >= TWENTY_FOUR_HOURS_MS) {
+    // Auto-refresh: full wipe (even incomplete quests)
+    data.available = QuestGenerator.generateDailyQuests(3);
+    data.active = null;
+    data.progress = 0;
+    data.lastRefreshTime = Date.now();
+    data.paidRerollsThisCycle = 0;  // Reset pricing
+    // NOTE: freeRerollAvailable unchanged — don't grant on timer
+    PersistenceManager.saveQuestData(player, data);
+
+    player.sendMessage("§e⏰ Your daily quests have refreshed!§r");
+    console.warn(`[QuestSystem] Auto-refreshed quests for ${player.name} (24h expired)`);
   }
 
-  if (quests.some((q) => q.id === questDef.id)) {
-    return { ok: false, reason: "§eYou already have that quest active.§r" };
+  return data;
+}
+
+/**
+ * Calculates SP cost for the next paid reroll.
+ * @param {number} paidRerollsThisCycle
+ * @returns {number} SP cost
+ */
+function calculateRerollPrice(paidRerollsThisCycle) {
+  const BASE_PRICE = 50;
+
+  if (paidRerollsThisCycle < 2) {
+    return BASE_PRICE;
   }
 
-  const newState = createQuestState(questDef);
-  quests.push(newState);
+  // 3rd reroll = 50 * 2^1 = 100
+  // 4th reroll = 50 * 2^2 = 200
+  // etc.
+  return BASE_PRICE * Math.pow(2, paidRerollsThisCycle - 1);
+}
 
-  if (questDef.type === "kill" || questDef.type === "mine") {
-    updateQuestHud(player, newState);
+/**
+ * Handles the refresh/reroll button click.
+ * @param {import("@minecraft/server").Player} player
+ * @returns {boolean} success
+ */
+function handleRefresh(player) {
+  const data = ensureQuestData(player);
+
+  // CASE 1: Free reroll available
+  if (data.freeRerollAvailable) {
+    data.freeRerollAvailable = false;
+    data.available = QuestGenerator.generateDailyQuests(3);
+    data.active = null;
+    data.progress = 0;
+    data.lastRefreshTime = Date.now();
+    data.paidRerollsThisCycle = 0;  // Reset pricing on free use
+    PersistenceManager.saveQuestData(player, data);
+
+    player.sendMessage("§a✓ Used free reroll! Complete all 3 quests to earn another.§r");
+    player.playSound("random.orb", { pitch: 1.2 });
+    return true;
   }
 
-  PersistenceManager.saveQuests(player, quests);
+  // CASE 2: Paid reroll
+  const price = calculateRerollPrice(data.paidRerollsThisCycle);
+  const objective = world.scoreboard.getObjective(SCOREBOARD_OBJECTIVE_ID);
 
-  return { ok: true, quest: newState };
+  if (!objective || !player.scoreboardIdentity) {
+    player.sendMessage("§cError accessing scoreboard.§r");
+    return false;
+  }
+
+  const currentSP = objective.getScore(player.scoreboardIdentity) ?? 0;
+
+  if (currentSP < price) {
+    player.sendMessage(`§cNot enough SP! Need ${price}, have ${currentSP}.§r`);
+    player.playSound("note.bass", { pitch: 0.5 });
+    return false;
+  }
+
+  // Deduct SP and refresh
+  objective.setScore(player.scoreboardIdentity, currentSP - price);
+  data.paidRerollsThisCycle += 1;
+  data.available = QuestGenerator.generateDailyQuests(3);
+  data.active = null;
+  data.progress = 0;
+  data.lastRefreshTime = Date.now();
+  PersistenceManager.saveQuestData(player, data);
+
+  const nextPrice = calculateRerollPrice(data.paidRerollsThisCycle);
+  player.sendMessage(`§a✓ Rerolled for ${price} SP! Next reroll: ${nextPrice} SP§r`);
+  player.playSound("random.orb", { pitch: 1.0 });
+
+  return true;
+}
+
+/**
+ * Accepts a quest from the available pool.
+ * @param {import("@minecraft/server").Player} player
+ * @param {number} questIndex - Index in available array (0, 1, or 2)
+ * @returns {{ ok: boolean, reason?: string, quest?: any }}
+ */
+function handleQuestAccept(player, questIndex) {
+  const data = ensureQuestData(player);
+
+  // Validate: already have active quest?
+  if (data.active !== null) {
+    return { ok: false, reason: "§cYou already have an active quest! Complete or abandon it first.§r" };
+  }
+
+  // Validate: index in bounds?
+  if (questIndex < 0 || questIndex >= data.available.length) {
+    return { ok: false, reason: "§cInvalid quest selection.§r" };
+  }
+
+  // Validate: slot not empty?
+  const quest = data.available[questIndex];
+  if (quest === null) {
+    return { ok: false, reason: "§cThat quest slot is empty.§r" };
+  }
+
+  // Accept the quest
+  data.active = { ...quest };  // Copy to active
+  data.progress = 0;
+  data.available[questIndex] = null;  // Mark slot as taken
+  PersistenceManager.saveQuestData(player, data);
+
+  // Start HUD if applicable
+  if (quest.type === "kill" || quest.type === "mine") {
+    updateQuestHud(player, { ...data.active, progress: 0, goal: quest.requiredCount, status: "active" });
+  }
+
+  return { ok: true, quest: quest };
+}
+
+/**
+ * Abandons the active quest and returns it to the available pool.
+ * @param {import("@minecraft/server").Player} player
+ * @returns {any|null} The abandoned quest, or null if none active
+ */
+function handleQuestAbandon(player) {
+  const data = ensureQuestData(player);
+
+  if (!data.active) {
+    player.sendMessage("§cNo active quest to abandon.§r");
+    return null;
+  }
+
+  const quest = data.active;
+
+  // Find an empty slot to return it to (or first slot if somehow all full)
+  const emptyIndex = data.available.findIndex(slot => slot === null);
+  if (emptyIndex !== -1) {
+    data.available[emptyIndex] = quest;
+  } else {
+    // Edge case: No empty slots (shouldn't happen if accept logic is correct, but safe fallback: put in slot 0)
+    data.available[0] = quest;
+  }
+
+  data.active = null;
+  data.progress = 0;
+  PersistenceManager.saveQuestData(player, data);
+
+  player.onScreenDisplay?.setActionBar?.("");
+
+  return quest;
 }
 
 function setPlayerTab(player, tab) {
@@ -198,78 +342,16 @@ function getPlayerTab(player) {
   const key = getPlayerKey(player);
   if (playerTabState.has(key)) return playerTabState.get(key);
 
+  const data = ensureQuestData(player);
   // Default logic: if has active quests, go to Active, else Available
-  const quests = getPlayerQuests(player);
-  const hasActive = quests.some((q) => q.status !== "complete");
-  // If they have completed quests effectively they are 'active' until turned in,
-  // but let's stick to the requested main tabs.
-  // We can merge 'Active' and 'Completed' concepts into 'Active' tab or handle logic.
-  // The 'Active' tab will show both in-progress and completed-waiting-turn-in.
+  const hasActive = data.active !== null;
   return hasActive ? BOARD_TABS.ACTIVE : BOARD_TABS.AVAILABLE;
-}
-
-/** -----------------------------
- *  Quest expiry / abandon
- *  ----------------------------- */
-
-function abandonQuest(player, questId) {
-  const quests = getPlayerQuests(player);
-  const index = quests.findIndex((quest) => quest.id === questId);
-  if (index === -1) return null;
-
-  const [removed] = quests.splice(index, 1);
-  PersistenceManager.saveQuests(player, quests);
-  player.onScreenDisplay?.setActionBar?.("");
-  return removed;
-}
-
-function expireQuestsForPlayer(player) {
-  const quests = getPlayerQuests(player);
-  if (!quests.length) return;
-
-  const expiryMs = CONFIG.questBoard?.expiryMs ?? 1000 * 60 * 60 * 24;
-  const now = Date.now();
-  const expiredTitles = [];
-
-  for (let i = quests.length - 1; i >= 0; i -= 1) {
-    const quest = quests[i];
-    if (quest.status === "complete") continue;
-    if (typeof quest.acceptedAtMs !== "number") continue;
-    if (now - quest.acceptedAtMs < expiryMs) continue;
-
-    quests.splice(i, 1);
-    expiredTitles.push(quest.title);
-  }
-
-  if (!expiredTitles.length) return;
-
-  for (const title of expiredTitles) {
-    player.sendMessage(`§eQuest expired:§r ${title}`);
-  }
-
-  const activeQuest = quests.find((q) => (q.type === "kill" || q.type === "mine") && q.status !== "complete");
-  if (activeQuest) {
-    updateQuestHud(player, activeQuest);
-  } else {
-    player.onScreenDisplay?.setActionBar?.("");
-  }
 }
 
 /** -----------------------------
  *  UI helpers
  *  ----------------------------- */
 
-function getAvailableQuestDefinitions(player) {
-  const quests = getPlayerQuests(player);
-  const activeIds = new Set(quests.map((quest) => quest.id));
-  return currentAvailableQuests.filter((def) => !activeIds.has(def.id));
-}
-
-function getMyQuests(player) {
-  return getPlayerQuests(player);
-}
-
-// Tabs structure
 const TABS_CONFIG = [
   { id: BOARD_TABS.AVAILABLE, label: "Available", icon: TEXTURES.TAB_AVAILABLE },
   { id: BOARD_TABS.ACTIVE, label: "Active", icon: TEXTURES.TAB_ACTIVE },
@@ -283,8 +365,6 @@ const TABS_CONFIG = [
 function addTabButtons(form, currentTab, actionsList) {
   for (const tab of TABS_CONFIG) {
     const isCurrent = tab.id === currentTab;
-    // Minecraft color codes: §l for bold, §r to reset, §8 for dark gray if inactive?
-    // User requested: "Use Minecraft color codes (§) and formatting to distinguish... Use bold text (§l) for the current selection."
     const label = isCurrent ? `§l${tab.label}§r` : `${tab.label}`;
 
     form.button(label, tab.icon);
@@ -293,16 +373,34 @@ function addTabButtons(form, currentTab, actionsList) {
 }
 
 async function showAvailableTab(player, actions, isStandalone = false) {
-  const available = getAvailableQuestDefinitions(player);
-  const quests = getPlayerQuests(player);
+  const data = ensureQuestData(player);
 
-  // If standalone, simplify header, otherwise use full header
+  // Count non-null quests
+  const availableQuests = data.available.filter(q => q !== null);
+  const activeCount = data.active ? 1 : 0;
+
+  // Calculate refresh button text
+  let refreshLabel;
+  if (data.freeRerollAvailable) {
+    refreshLabel = "§a⟳ Refresh Quests (FREE)§r";
+  } else {
+    const price = calculateRerollPrice(data.paidRerollsThisCycle);
+    refreshLabel = `§e⟳ Refresh Quests (${price} SP)§r`;
+  }
+
+  // Time until free refresh
+  const msUntilRefresh = (data.lastRefreshTime + TWENTY_FOUR_HOURS_MS) - Date.now();
+  const hoursLeft = Math.max(0, Math.floor(msUntilRefresh / (1000 * 60 * 60)));
+  const minsLeft = Math.max(0, Math.floor((msUntilRefresh % (1000 * 60 * 60)) / (1000 * 60)));
+  const timerText = msUntilRefresh > 0 ? `§7Auto-refresh in: ${hoursLeft}h ${minsLeft}m§r` : "";
+
   const header = isStandalone ? "" : "§2§l[ AVAILABLE ]§r\n\n";
   const body = [
-    `${header}§7Active: ${quests.length}/${MAX_ACTIVE_QUESTS}§r`,
+    `${header}§7Active: ${activeCount}/1§r`,
+    timerText,
     "",
-    available.length ? "§fNew Requests:§r" : "§7No new quests available. Check back later.§r",
-  ].join("\n");
+    availableQuests.length ? "§fNew Requests:§r" : "§7All quests accepted. Complete them or refresh!§r",
+  ].filter(Boolean).join("\n");
 
   const title = isStandalone ? "§lAvailable Quests§r" : "§lQuest Board§r";
 
@@ -315,16 +413,21 @@ async function showAvailableTab(player, actions, isStandalone = false) {
     addTabButtons(form, BOARD_TABS.AVAILABLE, actions);
   }
 
-  // 2. Content
-  for (const def of available) {
-    const icon = getQuestIcon(def);
-    const colors = getQuestColors(def.rarity);
-    // Use button-safe color for the form
-    form.button(`${colors.button}${def.title}§r`, icon);
-    actions.push({ type: "view_details", questId: def.id, fromStandalone: isStandalone });
-  }
+  // 2. Quest buttons
+  data.available.forEach((quest, index) => {
+    if (quest) {
+      const icon = getQuestIcon(quest);
+      const colors = getQuestColors(quest.rarity);
+      form.button(`${colors.button}${quest.title}§r`, icon);
+      actions.push({ type: "view_details", questIndex: index, fromStandalone: isStandalone });
+    }
+  });
 
-  // 3. Close option (always good UX)
+  // 3. Refresh button
+  form.button(refreshLabel, "textures/quest_ui/sp_coin.png");
+  actions.push({ type: "refresh", fromStandalone: isStandalone });
+
+  // 4. Close option (always good UX)
   form.button("Close");
   actions.push({ type: "close" });
 
@@ -332,15 +435,14 @@ async function showAvailableTab(player, actions, isStandalone = false) {
 }
 
 async function showActiveTab(player, actions, isStandalone = false) {
-  const myQuests = getMyQuests(player);
+  const data = ensureQuestData(player);
 
   const header = isStandalone ? "" : "§2§l[ ACTIVE ]§r\n\n";
-  const body = [
-    `${header}§7Your Quests (${myQuests.length}/${MAX_ACTIVE_QUESTS}):§r`,
-    myQuests.length ? "" : "§7You have no active quests.§r"
-  ].join("\n");
+  const body = data.active
+    ? `${header}§7Your Current Quest:§r`
+    : `${header}§7No active quest. Pick one from Available!§r`;
 
-  const title = isStandalone ? "§lActive Quests§r" : "§lQuest Board§r";
+  const title = isStandalone ? "§lActive Quest§r" : "§lQuest Board§r";
 
   const form = new ActionFormData()
     .title(title)
@@ -352,22 +454,25 @@ async function showActiveTab(player, actions, isStandalone = false) {
   }
 
   // 2. Content
-  for (const quest of myQuests) {
-    // For ACTIVE quests, the 'quest' object IS the definition (self-contained now).
-    // We don't need getQuestDefinition(quest.id) anymore for active quests.
+  if (data.active) {
+    const quest = data.active;
     const icon = getQuestIcon(quest);
     const colors = getQuestColors(quest.rarity);
 
-    if (quest.status === "complete") {
+    // Check completion
+    const isComplete = (quest.type === "gather")
+      ? true // Gather quests validate on turn-in
+      : data.progress >= quest.requiredCount;
+
+    // For mining/kill, we use data.progress. Gather is checked on turn-in.
+
+    if (isComplete) {
       form.button(`§aTurn In: ${quest.title}§r`, "textures/quest_ui/quest_tab_done.png");
-      actions.push({ type: "turnIn", questId: quest.id, fromStandalone: isStandalone });
+      actions.push({ type: "turnIn", fromStandalone: isStandalone });
     } else {
-      // Show progress
-      const progressStr = quest.goal > 0 ? `${quest.progress}/${quest.goal}` : "In Progress";
-      // Use §8 (Dark Gray) for subtitle text to be readable on button (light gray background)
+      const progressStr = `${data.progress}/${quest.requiredCount}`;
       form.button(`${colors.button}${quest.title}\n§8${progressStr}§r`, icon);
-      // Clicking an active quest gives options (Abandon)
-      actions.push({ type: "manage", questId: quest.id, fromStandalone: isStandalone });
+      actions.push({ type: "manage", fromStandalone: isStandalone });
     }
   }
 
@@ -421,7 +526,8 @@ async function showLeaderboardTab(player, actions, isStandalone = false) {
 
 async function showQuestBoard(player, forcedTab = null, isStandalone = false) {
   player.playSound("item.book.page_turn");
-  expireQuestsForPlayer(player);
+  // ensureQuestData handles expiry now, called inside tab functions too, but calling here helps consistency
+  const data = ensureQuestData(player);
 
   const tab = forcedTab || getPlayerTab(player);
   if (!isStandalone) {
@@ -461,24 +567,28 @@ async function handleUiAction(player, action) {
   const isStandalone = action.fromStandalone ?? false;
 
   if (action.type === "nav") {
-    // Switch tab - Nav usually implies tab switching so we might drop standalone?
-    // But if we have a refresh button under Leaderboard standalone, we want to keep it.
     await showQuestBoard(player, action.tab, isStandalone);
     return;
   }
 
+  if (action.type === "refresh") {
+    const success = handleRefresh(player);
+    await showQuestBoard(player, BOARD_TABS.AVAILABLE, isStandalone);
+    return;
+  }
+
   if (action.type === "view_details") {
-    // Show new details screen
-    await showQuestDetails(player, action.questId, isStandalone);
+    // Show details (needs index now)
+    await showQuestDetails(player, action.questIndex, isStandalone);
     return;
   }
 
   if (action.type === "accept") {
-    const result = tryAddQuest(player, action.questId);
+    const result = handleQuestAccept(player, action.questIndex);
     if (!result.ok) {
       player.sendMessage(result.reason);
     } else {
-      const def = getQuestDefinition(action.questId);
+      const def = result.quest;
       const colors = getQuestColors(def.rarity);
       player.sendMessage(`§aAccepted: ${colors.chat}${def.title}§r`);
 
@@ -501,20 +611,21 @@ async function handleUiAction(player, action) {
   }
 
   if (action.type === "turnIn") {
-    handleQuestTurnIn(player, action.questId);
+    handleQuestTurnIn(player);
     await showQuestBoard(player, BOARD_TABS.ACTIVE, isStandalone);
     return;
   }
 
   if (action.type === "manage") {
-    // Show management for specific quest (Abandon)
-    await showManageQuest(player, action.questId, isStandalone);
+    // Show management for active quest (Abandon)
+    await showManageQuest(player, isStandalone);
     return;
   }
 }
 
-async function showQuestDetails(player, questId, isStandalone = false) {
-  const def = getQuestDefinition(questId);
+async function showQuestDetails(player, questIndex, isStandalone = false) {
+  const data = ensureQuestData(player);
+  const def = data.available[questIndex];
   if (!def) return;
 
   // Formatting strings
@@ -524,7 +635,7 @@ async function showQuestDetails(player, questId, isStandalone = false) {
   let rewardsStr = "";
   if (scoreRaw > 0) rewardsStr += `\n§e+${scoreRaw} Town Reputation§r`;
   for (const item of itemsRaw) {
-    // Attempt to pretty print item name (e.g. minecraft:iron_ingot -> Iron Ingot)
+    // Attempt to pretty print item name
     const name = item.typeId.replace("minecraft:", "").replace(/_/g, " ");
     rewardsStr += `\n§b+${item.amount} ${name}§r`;
   }
@@ -561,31 +672,31 @@ async function showQuestDetails(player, questId, isStandalone = false) {
 
   if (res.selection === 0) {
     // Accept (Button 1 -> Index 0)
-    await handleUiAction(player, { type: "accept", questId, fromStandalone: isStandalone });
+    await handleUiAction(player, { type: "accept", questIndex, fromStandalone: isStandalone });
     return;
   }
 
-  // Decline (Button 2 -> Index 1) or Cancel
+  // Decline or Cancel
   if (res.canceled || res.selection === 1) {
     await showQuestBoard(player, BOARD_TABS.AVAILABLE, isStandalone);
   }
 }
 
-async function showManageQuest(player, questId, isStandalone = false) {
-  const state = getActiveQuestState(player, questId);
-  if (!state) {
+async function showManageQuest(player, isStandalone = false) {
+  const data = ensureQuestData(player);
+  if (!data.active) {
     await showQuestBoard(player, BOARD_TABS.ACTIVE, isStandalone);
     return;
   }
 
-  // For Active Quests, 'state' contains all info. We don't use 'def' anymore.
-  // const def = getQuestDefinition(questId); (Removed)
+  const quest = data.active;
+  const colors = getQuestColors(quest.rarity);
 
   const form = new MessageFormData()
     .title("§cAbandon Quest?")
-    .body("Are you sure you want to abandon this quest? Progress will be lost.")
-    .button1("Yes")
-    .button2("No");
+    .body(`Are you sure you want to abandon:\n${colors.chat}${quest.title}§r\n\nProgress will be lost and it will return to available quests.`)
+    .button1("Yes, Abandon")
+    .button2("No, Keep");
 
   const res = await form.show(player);
   // Button 1 ("Yes") -> 0
@@ -598,10 +709,10 @@ async function showManageQuest(player, questId, isStandalone = false) {
   }
 
   if (res.selection === 0) {
-    const removed = abandonQuest(player, questId);
+    const removed = handleQuestAbandon(player);
     if (removed) {
-      const colors = getQuestColors(removed.rarity);
-      player.sendMessage(`§eAbandoned: ${colors.chat}${removed.title}§r`);
+      const c = getQuestColors(removed.rarity);
+      player.sendMessage(`§eAbandoned: ${c.chat}${removed.title}§r`);
     }
     await showQuestBoard(player, BOARD_TABS.ACTIVE, isStandalone);
   }
@@ -647,12 +758,71 @@ function getLeaderboardEntries(player) {
  *  Kill/Event Logic
  *  ----------------------------- */
 
+/**
+ * Triggers celebration effects when player completes all 3 quests.
+ * @param {import("@minecraft/server").Player} player
+ * @param {number} spEarned - SP from the final quest (for message)
+ */
+function triggerQuestClearCelebration(player, spEarned) {
+  const pos = player.location;
+  const dim = player.dimension;
+
+  // === PHASE 1: Immediate Impact (0ms) ===
+
+  // Visual: Totem-style particle burst
+  dim.spawnParticle("minecraft:totem_particle", pos);
+
+  // Audio: Triumphant level-up
+  player.playSound("random.levelup", { location: pos, volume: 1.0, pitch: 1.2 });
+
+  // Title card
+  player.onScreenDisplay.setTitle("§6§l★ ALL QUESTS COMPLETE ★", {
+    subtitle: "§a3 new quests available! §7(+1 free reroll)",
+    fadeInDuration: 10,   // 0.5 sec
+    stayDuration: 60,     // 3 sec
+    fadeOutDuration: 20   // 1 sec
+  });
+
+  // === PHASE 2: Accent (0.5 sec) ===
+
+  system.runTimeout(() => {
+    player.playSound("random.orb", { location: pos, volume: 0.5, pitch: 1.5 });
+    dim.spawnParticle("minecraft:villager_happy", {
+      x: pos.x + 1, y: pos.y + 1, z: pos.z
+    });
+    dim.spawnParticle("minecraft:villager_happy", {
+      x: pos.x - 1, y: pos.y + 1, z: pos.z
+    });
+  }, 10);  // 10 ticks = 0.5 sec
+
+  // === PHASE 3: Flourish (1 sec) ===
+
+  system.runTimeout(() => {
+    player.playSound("ui.toast.challenge_complete", { location: pos, volume: 0.8, pitch: 1.0 });
+  }, 20);  // 20 ticks = 1 sec
+
+  // === Chat Message (persistent record) ===
+
+  player.sendMessage("§6═══════════════════════════════════════");
+  player.sendMessage("§6       ★ DAILY QUESTS CLEARED! ★");
+  player.sendMessage("§a       3 new quests are ready!");
+  player.sendMessage("§7       Free reroll earned for next time.");
+  player.sendMessage(`§e       (+${spEarned} SP from final quest)`);
+  player.sendMessage("§6═══════════════════════════════════════");
+}
+
 function updateQuestHud(player, questState) {
+  if (questState.status === "active") {
+    // Gather HUD is handled in loop, Kill/Mine here
+    // Logic same: show progress
+  }
+
   if (questState.status === "complete") {
     player.onScreenDisplay?.setActionBar?.("§aQuest complete! Return to board.§r");
     return;
   }
 
+  // If we are passing in a temporary state object, we trust it has progress/goal
   if (questState.type === "kill" || questState.type === "mine" || questState.type === "gather") {
     if (questState.goal <= 0) return;
     const remaining = Math.max(questState.goal - questState.progress, 0);
@@ -664,15 +834,19 @@ function updateQuestHud(player, questState) {
   }
 }
 
+// NOTE: markQuestComplete helper is less useful now as logic is split, but let's keep it for event handlers
 function markQuestComplete(player, questState) {
-  if (questState.status === "complete") return;
-  questState.status = "complete";
-  updateQuestHud(player, questState);
+  // Just playing sound/particle, turn-in logic does the real completion
+  // But wait, for Kill/Mine we need to know they are "Ready to Turn In".
+  // In new system: "Complete" means "Ready to Turn In" (status check in UI).
+  // But we don't have a status field on the object in DB anymore (it's flattened).
+  // So "Complete" is derived from progress >= goal.
+
+  // This function is called when progress hits goal in events.
+  player.onScreenDisplay?.setActionBar?.("§aQuest complete! Return to board.§r");
 
   const colors = getQuestColors(questState.rarity);
   player.sendMessage(`§aQuest Complete: ${colors.chat}${questState.title}§r`);
-
-  PersistenceManager.saveQuests(player, getPlayerQuests(player));
   player.playSound("random.levelup");
   player.dimension.spawnParticle("minecraft:villager_happy", player.location);
 }
@@ -681,12 +855,11 @@ function handleEntityDeath(ev) {
   const { damageSource, deadEntity } = ev;
   if (!deadEntity) return;
 
-  // 1. Determine Identity
-  const fullId = deadEntity.typeId; // e.g. "minecraft:skeleton"
-  const simpleId = fullId.replace("minecraft:", ""); // e.g. "skeleton"
-  const mobType = getMobType(deadEntity); // e.g. "zombie" (canonical) or undefined
+  const fullId = deadEntity.typeId;
+  const simpleId = fullId.replace("minecraft:", "");
+  const mobType = getMobType(deadEntity);
 
-  console.warn(`[DEBUG] Entity Died: ${fullId} (Simple: ${simpleId}, Mapped: ${mobType})`);
+  // console.warn(`[DEBUG] Entity Died: ${fullId}`);
 
   let killer = damageSource?.damagingEntity;
 
@@ -702,67 +875,62 @@ function handleEntityDeath(ev) {
 
   if (!killer || killer.typeId !== "minecraft:player") return;
 
-  const quests = getPlayerQuests(killer);
-  for (const quest of quests) {
-    if (quest.type !== "kill" || quest.status === "complete") continue;
+  const data = ensureQuestData(killer);
+  if (!data.active) return;
 
-    // Support Set or Array from persistence
-    const targets = Array.isArray(quest.targets) ? new Set(quest.targets) : quest.targets;
+  const quest = data.active;
+  if (quest.type !== "kill") return;
 
-    // Debug Log for verification
-    if (targets) {
-      console.warn(`[DEBUG] Checking Quest: "${quest.title}" Targets: ${JSON.stringify(Array.from(targets))}`);
-    }
+  // Check if already complete
+  if (data.progress >= quest.requiredCount) return;
 
-    // 2. Check Match (Robust)
-    let match = false;
-    if (targets && targets.has(fullId)) match = true;
-    if (targets && targets.has(simpleId)) match = true;
-    if (targets && mobType && targets.has(mobType)) match = true;
+  // Support Array from persistence (JSON) -> Convert to Set for lookup
+  const rawTargets = quest.targets || [];
+  // If it was saved as {} (Set bug), treat as empty array
+  const targets = (Array.isArray(rawTargets) || rawTargets instanceof Set) ? new Set(rawTargets) : new Set();
 
-    if (!match) continue;
+  let match = false;
+  if (targets && targets.has(fullId)) match = true;
+  if (targets && targets.has(simpleId)) match = true;
+  if (targets && mobType && targets.has(mobType)) match = true;
 
-    quest.progress += 1;
-    console.warn(`[DEBUG] Progress Update: ${quest.progress}/${quest.goal}`);
+  if (!match) return;
 
-    if (quest.progress >= quest.goal) {
-      quest.progress = quest.goal;
-      markQuestComplete(killer, quest);
-    } else {
-      updateQuestHud(killer, quest);
-    }
-    PersistenceManager.saveQuests(killer, quests);
+  data.progress += 1;
+  // console.warn(`[DEBUG] Progress Update: ${data.progress}/${quest.requiredCount}`);
+
+  if (data.progress >= quest.requiredCount) {
+    data.progress = quest.requiredCount;
+    markQuestComplete(killer, quest);
+  } else {
+    updateQuestHud(killer, { ...quest, progress: data.progress, goal: quest.requiredCount, status: "active" });
   }
+  PersistenceManager.saveQuestData(killer, data);
 }
 
 function handleBlockBreak(ev) {
   const { player, brokenBlockPermutation } = ev;
-  const quests = getPlayerQuests(player);
+  const data = ensureQuestData(player);
+  if (!data.active) return;
 
-  for (const quest of quests) {
-    if (quest.type !== "mine" || quest.status === "complete") continue;
+  const quest = data.active;
+  if (quest.type !== "mine") return;
+  if (data.progress >= quest.requiredCount) return;
 
-    const blockId = brokenBlockPermutation.type.id;
-    // Debug Log
-    if (quest.targetBlockIds) {
-      console.warn(`[DEBUG] Mine Event: ${blockId} | Checking Quest: "${quest.title}" Targets: ${JSON.stringify(quest.targetBlockIds)}`);
-    }
+  const blockId = brokenBlockPermutation.type.id;
 
-    // Self-contained check
-    // quest.targetBlockIds is on the object now
-    if (!quest.targetBlockIds?.includes(blockId)) continue;
+  if (!quest.targetBlockIds?.includes(blockId)) return;
 
-    quest.progress += 1;
-    console.warn(`[DEBUG] Mine Progress: ${quest.progress}/${quest.goal}`);
+  data.progress += 1;
+  // console.warn(`[DEBUG] Mine Progress: ${data.progress}/${quest.requiredCount}`);
 
-    if (quest.progress >= quest.goal) {
-      quest.progress = quest.goal;
-      markQuestComplete(player, quest);
-    } else {
-      updateQuestHud(player, quest);
-    }
-    PersistenceManager.saveQuests(player, quests);
+  if (data.progress >= quest.requiredCount) {
+    data.progress = quest.requiredCount;
+    markQuestComplete(player, quest);
+  } else {
+    updateQuestHud(player, { ...quest, progress: data.progress, goal: quest.requiredCount, status: "active" });
   }
+  PersistenceManager.saveQuestData(player, data);
 }
 
 function wireEntityHitTracking() {
@@ -776,74 +944,65 @@ function wireEntityHitTracking() {
   });
 }
 
-function handleQuestTurnIn(player, questId) {
-  const quests = getPlayerQuests(player);
-  const index = quests.findIndex((q) => q.id === questId);
-  if (index === -1) return;
+function handleQuestTurnIn(player) {
+  const data = ensureQuestData(player);
 
-  const quest = quests[index];
-  if (quest.status !== "complete") {
-    player.sendMessage("§eCompletion pending...§r");
+  if (!data.active) {
+    player.sendMessage("§cNo active quest to turn in.§r");
     return;
   }
 
-  // Self-contained data
-  const reward = quest.reward; // Was definition.reward
+  const quest = data.active;
 
-  // Check requirements if it's a gather quest
+  // === VALIDATE COMPLETION ===
+
   if (quest.type === "gather" && quest.targetItemIds) {
     const inventory = player.getComponent("inventory")?.container;
     if (!inventory) return;
 
-    // 1. Count Total
+    // Count items
     let totalCount = 0;
-
-    console.warn(`[DEBUG] Turn In Scan: Looking for ${JSON.stringify(quest.targetItemIds)}`);
-
     for (let i = 0; i < inventory.size; i++) {
       const item = inventory.getItem(i);
-      if (item) {
-        // console.warn(`[DEBUG] Slot ${i}: ${item.typeId} x${item.amount}`);
-        if (quest.targetItemIds.includes(item.typeId)) {
-          totalCount += item.amount;
-          console.warn(`[DEBUG] MATCH! Found ${item.amount} of ${item.typeId}`);
-        }
+      if (item && quest.targetItemIds.includes(item.typeId)) {
+        totalCount += item.amount;
       }
     }
 
-    if (totalCount < quest.goal) {
-      player.sendMessage(`§cYou need ${quest.goal - totalCount} more items!§r`);
+    if (totalCount < quest.requiredCount) {
+      player.sendMessage(`§cNeed ${quest.requiredCount - totalCount} more items!§r`);
       return;
     }
 
-    // 2. Consume Items
-    let remainingToRemove = quest.goal;
+    // Consume items
+    let remainingToRemove = quest.requiredCount;
     for (let i = 0; i < inventory.size; i++) {
       if (remainingToRemove <= 0) break;
       const item = inventory.getItem(i);
       if (item && quest.targetItemIds.includes(item.typeId)) {
         if (item.amount <= remainingToRemove) {
           remainingToRemove -= item.amount;
-          inventory.setItem(i, undefined); // Remove stack
+          inventory.setItem(i, undefined);
         } else {
           item.amount -= remainingToRemove;
           remainingToRemove = 0;
-          inventory.setItem(i, item); // Update stack
+          inventory.setItem(i, item);
         }
       }
     }
-
-    // Complete the quest state now if it wasn't already (gather quests might not auto-complete on progress)
-    quest.status = "complete";
+  } else if (quest.type === "kill" || quest.type === "mine") {
+    if (data.progress < quest.requiredCount) {
+      player.sendMessage(`§cProgress: ${data.progress}/${quest.requiredCount}§r`);
+      return;
+    }
   }
 
-  if (quest.status !== "complete") {
-    player.sendMessage("§eCompletion pending...§r");
-    return;
-  }
+  // === SUCCESSFUL TURN-IN ===
 
+  // Award rewards
+  const reward = quest.reward;
   if (reward) {
-    // 1. Scoreboard (Script API)
+    // Scoreboard points
     if (reward.scoreboardIncrement) {
       const objective = world.scoreboard.getObjective(SCOREBOARD_OBJECTIVE_ID);
       try {
@@ -855,7 +1014,7 @@ function handleQuestTurnIn(player, questId) {
       }
     }
 
-    // 2. Items
+    // Items
     if (reward.rewardItems) {
       const inventory = player.getComponent("inventory")?.container;
       if (inventory) {
@@ -863,50 +1022,53 @@ function handleQuestTurnIn(player, questId) {
           try {
             const itemStack = new ItemStack(rItem.typeId, rItem.amount);
             inventory.addItem(itemStack);
-            player.sendMessage(`§aReceived Reward: ${rItem.amount}x ${rItem.typeId.replace("minecraft:", "")}§r`);
+            player.sendMessage(`§aReceived: ${rItem.amount}x ${rItem.typeId.replace("minecraft:", "")}§r`);
           } catch (e) {
-            console.warn("Error giving reward: " + e);
-            player.sendMessage(`§cInv full or error giving reward: ${rItem.typeId}§r`);
+            // Inventory full — drop at feet
+            player.dimension.spawnItem(new ItemStack(rItem.typeId, rItem.amount), player.location);
+            player.sendMessage(`§eInventory full! Dropped: ${rItem.amount}x ${rItem.typeId.replace("minecraft:", "")}§r`);
           }
         }
       }
     }
   }
 
-  player.sendMessage(`§aQuest Complete: ${quest.title}§r`);
-  PersistenceManager.saveQuests(player, quests);
-  player.playSound("random.levelup");
-  player.dimension.spawnParticle("minecraft:villager_happy", player.location);
+  // Update stats
+  const spEarned = reward?.scoreboardIncrement ?? 0;
+  data.lifetimeCompleted += 1;
+  data.lifetimeSPEarned += spEarned;
 
-  // Clean up if we want them to stay in "Completed" state or remove them?
-  // Current logic: It stays 'complete' in the list until expired or manually removed?
-  // Wait, if we just set it to complete, it stays in the list.
-  // The original handleQuestTurnInLogic had:
-  // quest.status = "complete" -> Then save.
-  // Then the 'expireQuestsForPlayer' removes it eventually? Or it stays in "Active" tab as "Turn In"?
-  // Wait, if it's "Active" tab, we show "Turn In" button only if status is "complete"?
-  // Ah, the logic in handleQuestTurnIn is triggered BY the "Turn In" button.
-  // So once we do this logic, we should probably REMOVE it from the list or mark it "Archived"?
-  // Original logic:
-  // It marked it complete.
-  // But wait, the "Turn In" button in `showActiveTab` calls `handleQuestTurnIn`.
-  // If `handleQuestTurnIn` just marks it complete AGAIN, that's a loop.
-  // Look at original logic. It checked `if (def && def.reward)`. Then it did rewards.
-  // Then what? It didn't remove it from the array.
-  // `markQuestComplete` sets status to 'complete'.
-  // `handleQuestTurnIn` is called when player clicks "Turn In" (which appears when status IS complete).
-  // So this function is actually "Claim Rewards".
-  // After claiming rewards, we should REMOVE the quest.
+  // Clear active quest
+  data.active = null;
+  data.progress = 0;
 
-  // FIX: Remove quest after claiming rewards in turn-in.
-  const removeIdx = quests.findIndex(q => q.id === questId);
-  if (removeIdx !== -1) {
-    quests.splice(removeIdx, 1);
-    PersistenceManager.saveQuests(player, quests);
+  // === CHECK FOR FULL CLEAR ===
+  const allComplete = data.available.every(slot => slot === null);
+
+  if (allComplete) {
+    // JACKPOT! Auto-populate new quests
+    data.available = QuestGenerator.generateDailyQuests(3);
+    data.lastRefreshTime = Date.now();
+    data.freeRerollAvailable = true;
+    data.paidRerollsThisCycle = 0;
+
+    PersistenceManager.saveQuestData(player, data);
+
+    // CELEBRATION!
+    triggerQuestClearCelebration(player, spEarned);
+  } else {
+    // Normal turn-in
+    PersistenceManager.saveQuestData(player, data);
+
+    const colors = getQuestColors(quest.rarity);
+    player.sendMessage(`§a✓ Quest Complete: ${colors.chat}${quest.title}§r (+${spEarned} SP)`);
+    player.playSound("random.levelup");
+    player.dimension.spawnParticle("minecraft:villager_happy", player.location);
   }
+
+  // Clear HUD
+  player.onScreenDisplay?.setActionBar?.("");
 }
-
-
 
 /** -----------------------------
  *  Interaction & Wiring
@@ -998,6 +1160,15 @@ function wireInteractions() {
         ev.cancel = true;
         system.run(() => showQuestBoard(ev.sender));
       }
+
+      // DEBUG: Force Daily Reset
+      if (ev.message === "!forcedaily") {
+        ev.cancel = true;
+        const data = ensureQuestData(ev.sender);
+        data.lastRefreshTime = 0; // Force expiry on next access
+        PersistenceManager.saveQuestData(ev.sender, data);
+        system.run(() => ev.sender.sendMessage("§eDebug: Next board open will trigger 24h refresh.§r"));
+      }
     });
   }
 }
@@ -1012,6 +1183,7 @@ function bootstrap() {
   AtmosphereManager.init();
 
   system.runInterval(() => {
+    // Clean up entity hit map
     const now = Date.now();
     for (const [id, data] of lastHitPlayerByEntityId) {
       if (now - data.time > 30000) lastHitPlayerByEntityId.delete(id);
@@ -1021,58 +1193,49 @@ function bootstrap() {
   // Quest Loop: Inventory Monitor & Persistent HUD (Every 20 ticks / 1 second)
   system.runInterval(() => {
     for (const player of world.getPlayers()) {
-      const quests = getPlayerQuests(player);
-      let changed = false;
-      let hudQuest = null;
-
-      for (const quest of quests) {
-        // 1. Gather Logic (Active only)
-        if (quest.status === "active" && quest.type === "gather" && quest.targetItemIds) {
-          const inventory = player.getComponent("inventory")?.container;
-          if (inventory) {
-            let count = 0;
-            for (let i = 0; i < inventory.size; i++) {
-              const item = inventory.getItem(i);
-              if (item && quest.targetItemIds.includes(item.typeId)) count += item.amount;
-            }
-            if (quest.progress !== count) {
-              quest.progress = count;
-              changed = true;
-
-              // If goal met, mark complete
-              if (quest.progress >= quest.goal) {
-                markQuestComplete(player, quest);
-                // markQuestComplete saves, so we can reset changed to avoid double save (though harmless)
-                changed = false;
-              }
-            }
-          }
-        }
-
-        // 2. HUD Priority Determination
-        // Priority A: Any Completed Quest (Show "Return to Board")
-        if (quest.status === "complete") {
-          hudQuest = quest;
-          // We prioritize 'Complete' over 'Active', so we can overwrite any previously found active quest
-        }
-        // Priority B: Active Quest (Show Progress)
-        else if (quest.status === "active" && !hudQuest) {
-          // Only pick this if we haven't found a completed quest yet
-          // (And if we haven't found another active one? First active one wins for now)
-          hudQuest = quest;
-        }
-        // Note: If we found a completed quest, we keep it as hudQuest and ignore subsequent active ones.
-        // If we find ANOTHER completed quest, it overrides the previous completed one (Last finished wins).
+      const data = ensureQuestData(player); // Only load once
+      if (!data.active) {
+        player.onScreenDisplay?.setActionBar?.("");
+        continue;
       }
 
-      // 3. Update HUD
-      if (hudQuest) {
-        updateQuestHud(player, hudQuest);
+      const quest = data.active;
+      let changed = false;
+
+      // 1. Gather Logic (Active only)
+      if (quest.type === "gather" && quest.targetItemIds) {
+        // Gather logic validates on turn-in usually, but we can show HUD progress
+        // Note: spec says validate on turn-in, but HUD is nice.
+        const inventory = player.getComponent("inventory")?.container;
+        if (inventory) {
+          let count = 0;
+          for (let i = 0; i < inventory.size; i++) {
+            const item = inventory.getItem(i);
+            if (item && quest.targetItemIds.includes(item.typeId)) count += item.amount;
+          }
+          // We don't save progress to DB for gather quests typically until turn in?
+          // Actually spec says "progress" field exists.
+          if (data.progress !== count) {
+            data.progress = count;
+            changed = true; // Save it so UI shows it if we reopen
+          }
+
+          // For gather, we do NOT auto-complete.
+          updateQuestHud(player, { ...quest, progress: count, goal: quest.requiredCount, status: "active" });
+        }
+      } else {
+        // Kill / Mine
+        // Check if completion reached (already handled in events mostly, but HUD update here)
+        if (data.progress >= quest.requiredCount) {
+          updateQuestHud(player, { ...quest, progress: data.progress, goal: quest.requiredCount, status: "complete" });
+        } else {
+          updateQuestHud(player, { ...quest, progress: data.progress, goal: quest.requiredCount, status: "active" });
+        }
       }
 
       // 4. Persist Changes
       if (changed) {
-        PersistenceManager.saveQuests(player, quests);
+        PersistenceManager.saveQuestData(player, data);
       }
     }
   }, 20);
