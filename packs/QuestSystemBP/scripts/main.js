@@ -56,13 +56,45 @@ const SCOREBOARD_OBJECTIVE_DISPLAY = "Town Quests";
  * Textures
  */
 const TEXTURES = {
-  TAB_AVAILABLE: "textures/quest_ui/quest_tab_avail.png",
-  TAB_ACTIVE: "textures/quest_ui/quest_tab_active.png",
-  TAB_LEADERBOARD: "textures/quest_ui/quest_tab_stats.png",
-  QUEST_KILL: "textures/quest_ui/cat_slay.png",
-  QUEST_MINE: "textures/quest_ui/cat_mine.png",
-  QUEST_GATHER: "textures/quest_ui/cat_mine.png",
+  // Quest Categories
+  CATEGORY_UNDEAD: "textures/quest_ui/icon_undead.png",
+  CATEGORY_BEAST: "textures/quest_ui/icon_beast.png",
+  CATEGORY_MONSTER: "textures/quest_ui/icon_monster.png",
+  CATEGORY_PASSIVE: "textures/quest_ui/icon_passive.png",
+  CATEGORY_NETHER: "textures/quest_ui/icon_nether.png",
+  CATEGORY_AQUATIC: "textures/quest_ui/icon_aquatic.png",
+  CATEGORY_GATHERING: "textures/quest_ui/icon_gathering.png",
+  CATEGORY_MINING: "textures/quest_ui/icon_mining.png",
+  CATEGORY_FARMING: "textures/quest_ui/icon_farming.png",
+
+  // UI Elements
+  REFRESH: "textures/quest_ui/icon_refresh.png",
+  COMPLETE: "textures/quest_ui/icon_complete.png",
+  LEGENDARY: "textures/quest_ui/icon_legendary.png",
+  RARE: "textures/quest_ui/icon_rare.png",
+  CLOCK: "textures/quest_ui/icon_clock.png",
+  TROPHY: "textures/quest_ui/icon_trophy.png",
+  ALERT: "textures/quest_ui/icon_alert.png",
+  SP_COIN: "textures/quest_ui/icon_sp_coin.png",
+  CROWN: "textures/quest_ui/icon_crown.png",
+
+  // Fallback
   DEFAULT: "textures/items/book_writable",
+};
+
+const CATEGORY_TEXTURES = {
+  // Kill quest categories
+  undead: TEXTURES.CATEGORY_UNDEAD,
+  beast: TEXTURES.CATEGORY_BEAST,
+  monster: TEXTURES.CATEGORY_MONSTER,
+  passive: TEXTURES.CATEGORY_PASSIVE,
+  nether: TEXTURES.CATEGORY_NETHER,
+  aquatic: TEXTURES.CATEGORY_AQUATIC,
+
+  // Resource quest categories
+  gathering: TEXTURES.CATEGORY_GATHERING,
+  mining: TEXTURES.CATEGORY_MINING,
+  farming: TEXTURES.CATEGORY_FARMING,
 };
 
 const BOARD_TABS = {
@@ -71,12 +103,29 @@ const BOARD_TABS = {
   LEADERBOARD: "leaderboard",
 };
 
-// Map quest types/logic to specific textures if not directly on definition
-function getQuestIcon(def) {
-  if (def.icon) return def.icon;
-  if (def.type === "kill") return TEXTURES.QUEST_KILL;
-  if (def.type === "mine") return TEXTURES.QUEST_MINE;
-  if (def.type === "gather") return TEXTURES.QUEST_GATHER;
+/**
+ * Get icon for a quest based on rarity and category
+ * @param {Object} quest - Quest object with category and rarity fields
+ * @param {boolean} showRarityBadge - If true, legendary/rare quests show rarity icon instead
+ * @returns {string} Texture path
+ */
+function getQuestIcon(quest, showRarityBadge = false) {
+  // Rarity badge override (for special visual emphasis)
+  if (showRarityBadge) {
+    if (quest.rarity === "legendary") return TEXTURES.LEGENDARY;
+    if (quest.rarity === "rare") return TEXTURES.RARE;
+  }
+
+  // Category-based icon (primary system)
+  if (quest.category && CATEGORY_TEXTURES[quest.category]) {
+    return CATEGORY_TEXTURES[quest.category];
+  }
+
+  // Fallback to type-based (legacy support)
+  if (quest.type === "kill") return TEXTURES.CATEGORY_UNDEAD;
+  if (quest.type === "mine") return TEXTURES.CATEGORY_MINING;
+  if (quest.type === "gather") return TEXTURES.CATEGORY_GATHERING;
+
   return TEXTURES.DEFAULT;
 }
 
@@ -354,9 +403,9 @@ function getPlayerTab(player) {
  *  ----------------------------- */
 
 const TABS_CONFIG = [
-  { id: BOARD_TABS.AVAILABLE, label: "Available", icon: TEXTURES.TAB_AVAILABLE },
-  { id: BOARD_TABS.ACTIVE, label: "Active", icon: TEXTURES.TAB_ACTIVE },
-  { id: BOARD_TABS.LEADERBOARD, label: "Leaderboard", icon: TEXTURES.TAB_LEADERBOARD },
+  { id: BOARD_TABS.AVAILABLE, label: "Available" },
+  { id: BOARD_TABS.ACTIVE, label: "Active" },
+  { id: BOARD_TABS.LEADERBOARD, label: "Leaderboard" },
 ];
 
 /**
@@ -414,18 +463,20 @@ async function showAvailableTab(player, actions, isStandalone = false) {
     addTabButtons(form, BOARD_TABS.AVAILABLE, actions);
   }
 
-  // 2. Quest buttons
+  // 2. Quest buttons (rare/legendary show rarity badge, common shows category icon)
   data.available.forEach((quest, index) => {
     if (quest) {
-      const icon = getQuestIcon(quest);
+      const showRarityBadge = quest.rarity === "legendary" || quest.rarity === "rare";
+      const icon = getQuestIcon(quest, showRarityBadge);
       const colors = getQuestColors(quest.rarity);
       form.button(`${colors.button}${quest.title}§r`, icon);
       actions.push({ type: "view_details", questIndex: index, fromStandalone: isStandalone });
     }
   });
 
-  // 3. Refresh button
-  form.button(refreshLabel, "textures/quest_ui/sp_coin.png");
+  // 3. Refresh button — swaps between refresh arrows (free) and SP coin (paid)
+  const refreshIcon = data.freeRerollAvailable ? TEXTURES.REFRESH : TEXTURES.SP_COIN;
+  form.button(refreshLabel, refreshIcon);
   actions.push({ type: "refresh", fromStandalone: isStandalone });
 
   // 4. Close option (always good UX)
@@ -468,7 +519,7 @@ async function showActiveTab(player, actions, isStandalone = false) {
     // For mining/kill, we use data.progress. Gather is checked on turn-in.
 
     if (isComplete) {
-      form.button(`§aTurn In: ${quest.title}§r`, "textures/quest_ui/quest_tab_done.png");
+      form.button(`§aTurn In: ${quest.title}§r`, TEXTURES.COMPLETE);
       actions.push({ type: "turnIn", fromStandalone: isStandalone });
     } else {
       const progressStr = `${data.progress}/${quest.requiredCount}`;
