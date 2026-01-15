@@ -1,0 +1,26 @@
+{
+  "resource_pack_name": "superquester",
+  "texture_name": "textures/font/glyph_E1",
+  "texture_width": 256,
+  "texture_height": 256,
+  "characters": {
+    "\uE100": { "x": 0,   "y": 0,  "w": 32, "h": 32, "height": 18, "ascent": 14 },
+    "\uE101": { "x": 32,  "y": 0,  "w": 32, "h": 32, "height": 18, "ascent": 14 },
+    "\uE102": { "x": 64,  "y": 0,  "w": 32, "h": 32, "height": 18, "ascent": 14 },
+    "\uE103": { "x": 96,  "y": 0,  "w": 32, "h": 32, "height": 18, "ascent": 14 },
+    "\uE104": { "x": 128, "y": 0,  "w": 32, "h": 32, "height": 18, "ascent": 14 },
+    "\uE105": { "x": 160, "y": 0,  "w": 32, "h": 32, "height": 18, "ascent": 14 },
+    "\uE106": { "x": 192, "y": 0,  "w": 32, "h": 32, "height": 18, "ascent": 14 },
+    "\uE107": { "x": 224, "y": 0,  "w": 32, "h": 32, "height": 18, "ascent": 14 },
+    "\uE108": { "x": 0,   "y": 32, "w": 32, "h": 32, "height": 18, "ascent": 14 },
+    "\uE109": { "x": 32,  "y": 32, "w": 32, "h": 32, "height": 18, "ascent": 14 },
+    "\uE10A": { "x": 64,  "y": 32, "w": 32, "h": 32, "height": 18, "ascent": 14 },
+    "\uE10B": { "x": 96,  "y": 32, "w": 32, "h": 32, "height": 18, "ascent": 14 },
+    "\uE10C": { "x": 128, "y": 32, "w": 32, "h": 32, "height": 18, "ascent": 14 },
+    "\uE10D": { "x": 160, "y": 32, "w": 32, "h": 32, "height": 18, "ascent": 14 },
+    "\uE10E": { "x": 192, "y": 32, "w": 32, "h": 32, "height": 18, "ascent": 14 },
+    "\uE10F": { "x": 224, "y": 32, "w": 32, "h": 32, "height": 18, "ascent": 14 },
+    "\uE110": { "x": 0,   "y": 64, "w": 32, "h": 32, "height": 18, "ascent": 14 },
+    "\uE111": { "x": 32,  "y": 64, "w": 32, "h": 32, "height": 18, "ascent": 14 }
+  }
+}

@@ -7,6 +7,7 @@ import { registerSafeZoneEvents } from "./safeZone.js";
 import { PersistenceManager } from "./systems/PersistenceManager.js";
 import { QuestGenerator } from "./systems/QuestGenerator.js";
 import { AtmosphereManager } from "./systems/AtmosphereManager.js";
+import { ICONS, getIconForCategory } from "./icons.js";
 
 /**
  * QuestBoard Add-on — High-Utility UX Refactor
@@ -605,8 +606,6 @@ async function handleUiAction(player, action) {
         player.playSound("random.orb", { pitch: 1.0 });
       }
     }
-    // Refresh the board, respecting standalone state
-    await showQuestBoard(player, BOARD_TABS.AVAILABLE, isStandalone);
     return;
   }
 
@@ -826,11 +825,16 @@ function updateQuestHud(player, questState) {
   if (questState.type === "kill" || questState.type === "mine" || questState.type === "gather") {
     if (questState.goal <= 0) return;
     const remaining = Math.max(questState.goal - questState.progress, 0);
-    let icon = "⚔️";
-    if (questState.type === "mine") icon = "⛏️";
-    if (questState.type === "gather") icon = "🎒";
 
-    player.onScreenDisplay?.setActionBar?.(`§b${icon} ${questState.title}: ${questState.progress}/${questState.goal}§r`);
+    // Category-based icon from custom font
+    const icon = getIconForCategory(questState.category) || ICONS.ALERT;
+
+    // Rarity-based text color
+    let textColor = "§7"; // Common: gray
+    if (questState.rarity === "legendary") textColor = "§6"; // Legendary: gold
+    else if (questState.rarity === "rare") textColor = "§b"; // Rare: aqua
+
+    player.onScreenDisplay?.setActionBar?.(`${icon} ${textColor}${questState.title}: ${questState.progress}/${questState.goal}§r`);
   }
 }
 

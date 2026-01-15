@@ -91,6 +91,7 @@ export class QuestGenerator {
       title: `Kill ${count} ${target.name}s`,
       description: lore,
       type: "kill",
+      category: target.category, // For icon system lookup
       requiredCount: count,
       targets: [target.id.replace("minecraft:", "")], // Store as Array for JSON persistence
       // Note: mobTypes.js might expect simple IDs (e.g. "zombie") or full IDs. 
@@ -125,6 +126,7 @@ export class QuestGenerator {
       title: `${target.type === "mine" ? "Mine" : "Gather"} ${count} ${target.name}`,
       description: lore,
       type: target.type, // "mine" or "gather"
+      category: target.category, // For icon system lookup
       requiredCount: count,
       reward: {
         scoreboardIncrement: 1,
