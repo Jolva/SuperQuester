@@ -7,7 +7,7 @@ import { registerSafeZoneEvents } from "./safeZone.js";
 import { PersistenceManager } from "./systems/PersistenceManager.js";
 import { QuestGenerator } from "./systems/QuestGenerator.js";
 import { AtmosphereManager } from "./systems/AtmosphereManager.js";
-import { ICONS, getIconForCategory } from "./icons.js";
+// Icon system removed — see Boss Bar implementation for quest tracking HUD
 
 /**
  * QuestBoard Add-on — High-Utility UX Refactor
@@ -824,17 +824,14 @@ function updateQuestHud(player, questState) {
   // If we are passing in a temporary state object, we trust it has progress/goal
   if (questState.type === "kill" || questState.type === "mine" || questState.type === "gather") {
     if (questState.goal <= 0) return;
-    const remaining = Math.max(questState.goal - questState.progress, 0);
-
-    // Category-based icon from custom font
-    const icon = getIconForCategory(questState.category) || ICONS.ALERT;
 
     // Rarity-based text color
     let textColor = "§7"; // Common: gray
     if (questState.rarity === "legendary") textColor = "§6"; // Legendary: gold
     else if (questState.rarity === "rare") textColor = "§b"; // Rare: aqua
 
-    player.onScreenDisplay?.setActionBar?.(`${icon} ${textColor}${questState.title}: ${questState.progress}/${questState.goal}§r`);
+    // Clean text display (icons removed due to action bar height clipping)
+    player.onScreenDisplay?.setActionBar?.(`${textColor}${questState.title}: ${questState.progress}/${questState.goal}§r`);
   }
 }
 
