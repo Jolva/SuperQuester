@@ -663,7 +663,6 @@ async function handleUiAction(player, action) {
 
   if (action.type === "turnIn") {
     handleQuestTurnIn(player);
-    await showQuestBoard(player, BOARD_TABS.ACTIVE, isStandalone);
     return;
   }
 
@@ -1060,7 +1059,14 @@ function handleQuestTurnIn(player) {
       const objective = world.scoreboard.getObjective(SCOREBOARD_OBJECTIVE_ID);
       try {
         if (objective && player.scoreboardIdentity) {
+          // Use API if player already has a scoreboard identity
           objective.addScore(player.scoreboardIdentity, reward.scoreboardIncrement);
+        } else {
+          // Fallback: player.scoreboardIdentity is undefined if they've never been on a scoreboard.
+          // Use command to ensure the score is always added.
+          player.runCommandAsync(`scoreboard players add @s ${SCOREBOARD_OBJECTIVE_ID} ${reward.scoreboardIncrement}`).catch((e) => {
+            console.warn("Failed to add score via command: " + e);
+          });
         }
       } catch (e) {
         console.warn("Failed to update score: " + e);
