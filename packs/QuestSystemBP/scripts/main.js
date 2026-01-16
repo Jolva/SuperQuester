@@ -134,14 +134,15 @@ const LEADERBOARD_ENTRY_LIMIT = 10;
 // Color Palettes
 function getQuestColors(rarity) {
   // Returns { chat: "code", button: "code" }
+  // NOTE: button colors should be light for visibility on custom stone button textures
   switch (rarity) {
     case "legendary":
-      return { chat: "§6§l", button: "§6" }; // Gold/Gold
+      return { chat: "§6§l", button: "§6" }; // Gold/Gold (already visible)
     case "rare":
-      return { chat: "§b", button: "§1" }; // Aqua/Dark Blue (Button)
+      return { chat: "§b", button: "§b" };   // Aqua/Aqua (changed from dark blue)
     case "common":
     default:
-      return { chat: "§7", button: "§0" }; // Gray/Black
+      return { chat: "§7", button: "§f" };   // Gray chat / White button (changed from black)
   }
 }
 

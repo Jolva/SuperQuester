@@ -1,0 +1,219 @@
+{
+  "namespace": "server_form",
+  "_comment_header": "============================================================",
+  "_comment_title": "QUEST SYSTEM - CUSTOM BUTTON TEXTURE OVERRIDE",
+  "_comment_header2": "============================================================",
+  "_comment_purpose": "This file overrides the default ActionFormData buttons with custom 9-slice textures.",
+  "_comment_how_it_works": "We define our own button type with custom background images and override 'dynamic_button' which is the element vanilla uses in server_form for each form button.",
+  "_comment_lessons_learned": "=== LESSONS LEARNED (for future agents) ===",
+  "_comment_lesson1": "1. Extending common_buttons.light_text_button with $texture variables does NOT work - the textures won't apply.",
+  "_comment_lesson2": "2. You MUST define a complete custom button with controls array containing default/hover/pressed states.",
+  "_comment_lesson3": "3. Use 'font_type: smooth' for crisp text rendering that matches vanilla.",
+  "_comment_lesson4": "4. The 'nineslice_size' value should be ~12-16% of the texture size for good corner preservation.",
+  "_comment_lesson5": "5. Button hover/pressed states use 'color' multiplier: >1.0 = brighter, <1.0 = darker.",
+  "_comment_textures_section": "=== BACKGROUND TEXTURE DEFINITIONS ===",
+  "_comment_texture_path": "Textures are located at: packs/QuestSystemRP/textures/quest_ui/",
+  "_comment_nineslice_explanation": "nineslice_size=16 means 16px corners are preserved during scaling (rest stretches)",
+  "quest_button_default": {
+    "type": "image",
+    "texture": "textures/quest_ui/quest_button_common",
+    "size": [
+      "100%",
+      "100%"
+    ],
+    "nineslice_size": 10,
+    "layer": 1
+  },
+  "quest_button_hover": {
+    "type": "image",
+    "texture": "textures/quest_ui/quest_button_common",
+    "size": [
+      "100%",
+      "100%"
+    ],
+    "nineslice_size": 10,
+    "layer": 1,
+    "color": [
+      1.3,
+      1.3,
+      1.3,
+      1.0
+    ]
+  },
+  "quest_button_pressed": {
+    "type": "image",
+    "texture": "textures/quest_ui/quest_button_common",
+    "size": [
+      "100%",
+      "100%"
+    ],
+    "nineslice_size": 10,
+    "layer": 1,
+    "color": [
+      0.7,
+      0.7,
+      0.7,
+      1.0
+    ]
+  },
+  "_comment_button_section": "=== CUSTOM BUTTON DEFINITION ===",
+  "_comment_button_structure": "Button uses 'default_control', 'hover_control', 'pressed_control' to reference control names in the controls array.",
+  "_comment_button_states": "When user hovers, only 'hover' control is visible. When pressed, only 'pressed' control is visible.",
+  "quest_form_button": {
+    "type": "button",
+    "$pressed_button_name": "button.form_button_click",
+    "anchor_from": "top_left",
+    "anchor_to": "top_left",
+    "size": [
+      "fill",
+      32
+    ],
+    "layer": 2,
+    "default_control": "default",
+    "hover_control": "hover",
+    "pressed_control": "pressed",
+    "controls": [
+      {
+        "default@server_form.quest_button_default": {}
+      },
+      {
+        "hover@server_form.quest_button_hover": {}
+      },
+      {
+        "pressed@server_form.quest_button_pressed": {}
+      },
+      {
+        "button_label": {
+          "type": "label",
+          "layer": 10,
+          "offset": [
+            0,
+            -2
+          ],
+          "shadow": true,
+          "text": "#form_button_text",
+          "color": "$text_color",
+          "font_type": "smooth",
+          "font_scale_factor": 1.0,
+          "bindings": [
+            {
+              "binding_name": "#form_button_text",
+              "binding_type": "collection",
+              "binding_collection_name": "form_buttons"
+            }
+          ]
+        }
+      }
+    ],
+    "$text_color": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "bindings": [
+      {
+        "binding_type": "collection_details",
+        "binding_collection_name": "form_buttons"
+      }
+    ]
+  },
+  "_comment_override_section": "=== DYNAMIC BUTTON OVERRIDE ===",
+  "_comment_dynamic_button": "This overrides the vanilla 'dynamic_button' element from server_form.json.",
+  "_comment_icon_panel": "panel_name contains the icon image (from ActionFormData button textures).",
+  "_comment_form_button": "form_button uses our custom quest_form_button with the stone texture.",
+  "dynamic_button": {
+    "type": "stack_panel",
+    "size": [
+      "100%",
+      32
+    ],
+    "orientation": "horizontal",
+    "controls": [
+      {
+        "panel_name": {
+          "type": "panel",
+          "size": [
+            34,
+            "100%c"
+          ],
+          "bindings": [
+            {
+              "binding_type": "view",
+              "source_control_name": "image",
+              "resolve_sibling_scope": true,
+              "source_property_name": "(not (#texture = ''))",
+              "target_property_name": "#visible"
+            }
+          ],
+          "controls": [
+            {
+              "image": {
+                "type": "image",
+                "layer": 2,
+                "size": [
+                  32,
+                  32
+                ],
+                "offset": [
+                  0,
+                  0
+                ],
+                "bindings": [
+                  {
+                    "binding_name": "#form_button_texture",
+                    "binding_name_override": "#texture",
+                    "binding_type": "collection",
+                    "binding_collection_name": "form_buttons"
+                  },
+                  {
+                    "binding_name": "#form_button_texture_file_system",
+                    "binding_name_override": "#texture_file_system",
+                    "binding_type": "collection",
+                    "binding_collection_name": "form_buttons"
+                  },
+                  {
+                    "binding_type": "view",
+                    "source_property_name": "(not ((#texture = '') or (#texture = 'loading')))",
+                    "target_property_name": "#visible"
+                  }
+                ]
+              }
+            },
+            {
+              "progress@progress.progress_loading_bars": {
+                "size": [
+                  30,
+                  4
+                ],
+                "offset": [
+                  -2,
+                  16
+                ],
+                "bindings": [
+                  {
+                    "binding_type": "view",
+                    "source_control_name": "image",
+                    "resolve_sibling_scope": true,
+                    "source_property_name": "(#texture = 'loading')",
+                    "target_property_name": "#visible"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "form_button@server_form.quest_form_button": {}
+      }
+    ]
+  },
+  "_comment_future_section": "=== FUTURE ENHANCEMENTS ===",
+  "_comment_future1": "To add rarity-based button textures (legendary, rare, epic):",
+  "_comment_future2": "1. Create texture files: quest_button_legendary.png, quest_button_rare.png, etc.",
+  "_comment_future3": "2. Define new texture elements like quest_button_legendary_default, quest_button_legendary_hover, etc.",
+  "_comment_future4": "3. Create new button types like quest_form_button_legendary that use those textures.",
+  "_comment_future5": "4. Modify the form generation in main.js to pass a rarity indicator.",
+  "_comment_future6": "5. Use bindings or separate button factories to select the right texture based on rarity."
+}
