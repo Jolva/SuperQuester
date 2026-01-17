@@ -3,7 +3,7 @@ import { ActionFormData, MessageFormData } from "@minecraft/server-ui";
 import { ensureObjective } from "./scoreboard.js";
 import { getMobType } from "./quests/mobTypes.js";
 import { CONFIG } from "./config.js";
-import { registerSafeZoneEvents } from "./safeZone.js";
+import { registerSafeZoneEvents, handleSafeZoneCommand } from "./safeZone.js";
 import { PersistenceManager } from "./systems/PersistenceManager.js";
 import { QuestGenerator } from "./systems/QuestGenerator.js";
 import { AtmosphereManager } from "./systems/AtmosphereManager.js";
@@ -16,15 +16,35 @@ import { AtmosphereManager } from "./systems/AtmosphereManager.js";
  * - Persistent User State (player.name)
  */
 
+// PERMANENT Hub Spawn Location (staircase leading to quest board)
+const HUB_SPAWN_LOCATION = { x: 84, y: 78, z: -278 };
+// Rotation: yaw = horizontal (0=south, 90=west, 180=north, -90=east), pitch = vertical
+const HUB_SPAWN_ROTATION = { x: 0, y: 90 }; // Facing West toward the quest board
+
 // Log on world load (Kept from original main.js)
 world.afterEvents.worldInitialize.subscribe(() => {
   console.warn('Quest System BP loaded successfully');
-  world.setDefaultSpawnLocation({ x: -319, y: 74, z: 210 });
+  world.setDefaultSpawnLocation(HUB_SPAWN_LOCATION);
 });
 
-// Load data when player joins
+// Load data when player joins AND force spawn at hub
 world.afterEvents.playerSpawn.subscribe((ev) => {
-  const { player } = ev;
+  const { player, initialSpawn } = ev;
+
+  // Force ALL players to spawn at hub (new players AND respawns)
+  // This overrides beds and other spawn points
+  system.runTimeout(() => {
+    try {
+      player.teleport(HUB_SPAWN_LOCATION, {
+        rotation: HUB_SPAWN_ROTATION,
+        checkForBlocks: true
+      });
+    } catch (e) {
+      console.warn(`[Spawn] Failed to teleport ${player.name}: ${e}`);
+    }
+  }, 5); // Small delay to ensure player is fully loaded
+
+  // Load quest data
   const quests = PersistenceManager.loadQuests(player);
 
   if (quests && quests.length > 0) {
@@ -958,6 +978,10 @@ function handleEntityDeath(ev) {
   if (!match) return;
 
   data.progress += 1;
+
+  // Play progress tick sound (randomly selects from 5 variants)
+  killer.playSound("quest.progress_tick", { volume: 0.6, pitch: 1.0 });
+
   // console.warn(`[DEBUG] Progress Update: ${data.progress}/${quest.requiredCount}`);
 
   if (data.progress >= quest.requiredCount) {
@@ -983,6 +1007,10 @@ function handleBlockBreak(ev) {
   if (!quest.targetBlockIds?.includes(blockId)) return;
 
   data.progress += 1;
+
+  // Play progress tick sound (randomly selects from 5 variants)
+  player.playSound("quest.progress_tick", { volume: 0.6, pitch: 1.0 });
+
   // console.warn(`[DEBUG] Mine Progress: ${data.progress}/${quest.requiredCount}`);
 
   if (data.progress >= quest.requiredCount) {
@@ -1324,6 +1352,12 @@ function wireInteractions() {
   const chatEvent = world.beforeEvents?.chatSend;
   if (chatEvent?.subscribe) {
     chatEvent.subscribe((ev) => {
+      // Safe Zone Commands (!safezone on/off/status)
+      if (ev.message.startsWith("!safezone")) {
+        handleSafeZoneCommand(ev);
+        return;
+      }
+
       if (ev.message === "!builder") {
         ev.cancel = true;
 

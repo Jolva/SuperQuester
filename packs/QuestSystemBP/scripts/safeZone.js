@@ -1,10 +1,32 @@
 import { world, system } from "@minecraft/server";
-import { CONFIG } from "./config.js";
 
 const WARN_MESSAGE = "§cProtected Hub: No Building Allowed.";
+const DEFAULT_RADIUS = 40;
 
+// PERMANENT Quest Board Location - This is the fixed center of the safe zone
+const QUEST_BOARD_LOCATION = { x: 72, y: 75, z: -278 };
+
+// Dynamic state - can be toggled in-game
+let safeZoneEnabled = true;
+
+/**
+ * Gets the quest board location (hardcoded permanent location).
+ * @returns {{ x: number, y: number, z: number }}
+ */
+function getBoardLocation() {
+  return QUEST_BOARD_LOCATION;
+}
+
+/**
+ * Get safe zone configuration, using dynamic board location.
+ * @returns {{ enabled: boolean, center: {x: number, y: number, z: number} | null, radius: number }}
+ */
 function getSafeZoneConfig() {
-  return CONFIG?.safeZone ?? { enabled: false };
+  return {
+    enabled: safeZoneEnabled,
+    center: getBoardLocation(),
+    radius: DEFAULT_RADIUS
+  };
 }
 
 /**
@@ -24,28 +46,53 @@ export function isInSafeZone(location) {
 }
 
 /**
+ * Toggle safe zone on or off
+ * @param {boolean} enabled 
+ */
+export function setSafeZoneEnabled(enabled) {
+  safeZoneEnabled = enabled;
+  console.warn(`[SafeZone] Protection ${enabled ? "ENABLED" : "DISABLED"}`);
+}
+
+/**
+ * Get current safe zone status
+ * @returns {boolean}
+ */
+export function isSafeZoneEnabled() {
+  return safeZoneEnabled;
+}
+
+/**
  * Checks if a player is permitted to bypass safe zone restrictions.
  * @param {import("@minecraft/server").Player} player 
  */
 function canBypass(player) {
-  const { debug } = getSafeZoneConfig();
-  if (debug) return false;
-  // Safeguard: isOp might not exist in older API versions or if version bind failed
-  if (player.isOp && typeof player.isOp === "function") {
-    return player.isOp();
+  // Check for admin tag
+  if (player.hasTag && player.hasTag("admin")) return true;
+
+  // Check for operator status
+  try {
+    if (player.isOp && typeof player.isOp === "function" && player.isOp()) {
+      return true;
+    }
+  } catch (e) {
+    // isOp may not be available in all versions
   }
-  // Fallback: Check for 'admin' tag or name (HARDCODED for now to unblock)
-  if (player.name === "Jolva") return true;
+
+  // Fallback: hardcoded names (can be expanded)
+  const ADMIN_NAMES = ["Jolva"];
+  if (ADMIN_NAMES.includes(player.name)) return true;
+
   return false;
 }
 
 export function registerSafeZoneEvents() {
-  const { enabled } = getSafeZoneConfig();
-  if (!enabled) return;
+  console.warn("[SafeZone] Registering protection events (40 block radius around quest board)");
 
-  // 1. Block Break
+  // 1. Block Break Prevention
   world.beforeEvents.playerBreakBlock.subscribe((ev) => {
     try {
+      if (!safeZoneEnabled) return;
       if (canBypass(ev.player)) return;
       if (isInSafeZone(ev.block.location)) {
         ev.cancel = true;
@@ -58,10 +105,11 @@ export function registerSafeZoneEvents() {
     }
   });
 
-  // 2. Block Place
+  // 2. Block Place Prevention
   if (world.beforeEvents.playerPlaceBlock) {
     world.beforeEvents.playerPlaceBlock.subscribe((ev) => {
       try {
+        if (!safeZoneEnabled) return;
         if (canBypass(ev.player)) return;
         if (isInSafeZone(ev.block.location)) {
           ev.cancel = true;
@@ -75,10 +123,12 @@ export function registerSafeZoneEvents() {
     });
   }
 
-  // 3. Peaceful Hub (Prevent Hostile Mob Damage)
+  // 3. Prevent Player Damage from Hostile Mobs in Safe Zone
   const damageEvent = world.beforeEvents.entityDamage ?? world.beforeEvents.entityHurt;
   if (damageEvent) {
     damageEvent.subscribe((ev) => {
+      if (!safeZoneEnabled) return;
+
       const entity = ev.entity ?? ev.hurtEntity;
       if (!entity || entity.typeId !== "minecraft:player") return;
 
@@ -91,16 +141,34 @@ export function registerSafeZoneEvents() {
     });
   }
 
-  // 4. Clean up hostile mobs that somehow spawn in
+  // 4. Prevent Explosion Damage in Safe Zone (creepers, TNT, etc.)
+  if (world.beforeEvents.explosion) {
+    world.beforeEvents.explosion.subscribe((ev) => {
+      if (!safeZoneEnabled) return;
+
+      // Check if explosion origin is in safe zone
+      if (ev.source && isInSafeZone(ev.source.location)) {
+        ev.cancel = true;
+        return;
+      }
+
+      // Filter out blocks that would be destroyed in safe zone
+      if (ev.getImpactedBlocks) {
+        const blocks = ev.getImpactedBlocks();
+        const safeBlocks = blocks.filter(block => !isInSafeZone(block.location));
+        ev.setImpactedBlocks(safeBlocks);
+      }
+    });
+  }
+
+  // 5. Clean up hostile mobs that spawn in safe zone
   world.afterEvents.entitySpawn.subscribe((ev) => {
+    if (!safeZoneEnabled) return;
+
     const { entity, cause } = ev;
     if (!entity.isValid()) return;
 
-    // Debug spawn cause
-    // console.warn(`[DEBUG] Spawn: ${entity.typeId}, Cause: ${cause}, Loc: ${JSON.stringify(entity.location)}`);
-
     // Allow manual spawning by admins/testing
-    // 'SpawnEgg' is standard. 'Loaded' means chunk load.
     if (cause === "SpawnEgg" || cause === "Command" || cause === "Override") return;
 
     if (isHostile(entity.typeId) && isInSafeZone(entity.location)) {
@@ -110,16 +178,108 @@ export function registerSafeZoneEvents() {
       } catch (e) { }
     }
   });
+
+  // 6. Prevent Enderman block pickup in safe zone
+  world.afterEvents.entityLoad.subscribe((ev) => {
+    if (!safeZoneEnabled) return;
+
+    const { entity } = ev;
+    if (entity.typeId === "minecraft:enderman" && isInSafeZone(entity.location)) {
+      // Remove enderman's carried block if any or just remove endermen entirely
+      try {
+        entity.remove();
+      } catch (e) { }
+    }
+  });
+}
+
+/**
+ * Register the !safezone command for toggling protection
+ * @param {import("@minecraft/server").ChatSendBeforeEvent} ev 
+ */
+export function handleSafeZoneCommand(ev) {
+  const { sender, message } = ev;
+
+  if (!message.startsWith("!safezone")) return false;
+
+  // Check if player is admin
+  if (!canBypass(sender)) {
+    sender.sendMessage("§cYou don't have permission to use this command.§r");
+    ev.cancel = true;
+    return true;
+  }
+
+  const args = message.trim().split(/\s+/);
+  const subcommand = args[1]?.toLowerCase();
+
+  ev.cancel = true;
+
+  switch (subcommand) {
+    case "on":
+    case "enable":
+      setSafeZoneEnabled(true);
+      sender.sendMessage("§a✓ Safe Zone protection ENABLED§r");
+      sender.sendMessage(`§7Radius: ${DEFAULT_RADIUS} blocks around quest board§r`);
+      break;
+
+    case "off":
+    case "disable":
+      setSafeZoneEnabled(false);
+      sender.sendMessage("§c✗ Safe Zone protection DISABLED§r");
+      sender.sendMessage("§7Players can now build/break in the protected area§r");
+      break;
+
+    case "status":
+      const config = getSafeZoneConfig();
+      sender.sendMessage("§6=== Safe Zone Status ===§r");
+      sender.sendMessage(`§7Protection: ${safeZoneEnabled ? "§aENABLED" : "§cDISABLED"}§r`);
+      if (config.center) {
+        sender.sendMessage(`§7Center: X:${config.center.x}, Y:${config.center.y}, Z:${config.center.z}§r`);
+      } else {
+        sender.sendMessage("§7Center: §cNot set (place quest board first)§r");
+      }
+      sender.sendMessage(`§7Radius: ${config.radius} blocks§r`);
+      break;
+
+    case "radius":
+      sender.sendMessage(`§7Current radius: ${DEFAULT_RADIUS} blocks§r`);
+      sender.sendMessage("§7(Radius is hardcoded - modify safeZone.js to change)§r");
+      break;
+
+    default:
+      sender.sendMessage("§6=== Safe Zone Commands ===§r");
+      sender.sendMessage("§e!safezone on§r - Enable protection");
+      sender.sendMessage("§e!safezone off§r - Disable protection");
+      sender.sendMessage("§e!safezone status§r - Show current settings");
+      break;
+  }
+
+  return true;
 }
 
 function isHostile(typeId) {
-  // This list can be expanded or moved to config if needed
   const HOSTILES = [
-    "minecraft:zombie", "minecraft:creeper", "minecraft:skeleton",
-    "minecraft:spider", "minecraft:witch", "minecraft:enderman",
-    "minecraft:pillager", "minecraft:ravager", "minecraft:zombie_villager",
-    "minecraft:drowned", "minecraft:husk", "minecraft:stray",
-    "minecraft:phantom", "minecraft:slime", "minecraft:magma_cube"
+    // Undead
+    "minecraft:zombie", "minecraft:zombie_villager", "minecraft:drowned",
+    "minecraft:husk", "minecraft:skeleton", "minecraft:stray",
+    "minecraft:wither_skeleton", "minecraft:phantom", "minecraft:zoglin",
+
+    // Monsters
+    "minecraft:creeper", "minecraft:spider", "minecraft:cave_spider",
+    "minecraft:witch", "minecraft:slime", "minecraft:magma_cube",
+    "minecraft:silverfish", "minecraft:endermite", "minecraft:guardian",
+    "minecraft:elder_guardian",
+
+    // Nether
+    "minecraft:blaze", "minecraft:ghast", "minecraft:hoglin",
+    "minecraft:piglin_brute",
+
+    // Illagers
+    "minecraft:pillager", "minecraft:vindicator", "minecraft:evoker",
+    "minecraft:ravager", "minecraft:vex", "minecraft:illusioner",
+
+    // Others
+    "minecraft:enderman", "minecraft:shulker", "minecraft:warden"
   ];
   return HOSTILES.includes(typeId);
 }

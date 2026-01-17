@@ -91,6 +91,36 @@
           "load_on_low_memory": true
         }
       ]
+    },
+    "quest.progress_tick": {
+      "category": "player",
+      "sounds": [
+        {
+          "name": "sounds/ui/progress_tick_1",
+          "volume": 0.6,
+          "load_on_low_memory": true
+        },
+        {
+          "name": "sounds/ui/progress_tick_2",
+          "volume": 0.6,
+          "load_on_low_memory": true
+        },
+        {
+          "name": "sounds/ui/progress_tick_3",
+          "volume": 0.6,
+          "load_on_low_memory": true
+        },
+        {
+          "name": "sounds/ui/progress_tick_4",
+          "volume": 0.6,
+          "load_on_low_memory": true
+        },
+        {
+          "name": "sounds/ui/progress_tick_5",
+          "volume": 0.6,
+          "load_on_low_memory": true
+        }
+      ]
     }
   }
 }
