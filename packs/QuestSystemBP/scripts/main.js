@@ -577,14 +577,24 @@ async function showLeaderboardTab(player, actions, isStandalone = false) {
   return form;
 }
 
-async function showQuestBoard(player, forcedTab = null, isStandalone = false) {
-  player.playSound("item.book.page_turn");
+async function showQuestBoard(player, forcedTab = null, isStandalone = false, playOpenSound = true) {
   // ensureQuestData handles expiry now, called inside tab functions too, but calling here helps consistency
   const data = ensureQuestData(player);
 
   const tab = forcedTab || getPlayerTab(player);
   if (!isStandalone) {
     setPlayerTab(player, tab); // Ensure state is synced only if navigating
+  }
+
+  // Play menu open sounds based on which tab is opening (initial open only)
+  if (playOpenSound) {
+    if (tab === BOARD_TABS.AVAILABLE) {
+      player.playSound("ui.available_open", { volume: 0.8, pitch: 1.0 });
+    } else if (tab === BOARD_TABS.ACTIVE) {
+      player.playSound("ui.active_open", { volume: 0.8, pitch: 1.0 });
+    } else if (tab === BOARD_TABS.LEADERBOARD) {
+      player.playSound("ui.legends_open", { volume: 0.8, pitch: 1.0 });
+    }
   }
 
   let form;
@@ -620,13 +630,13 @@ async function handleUiAction(player, action) {
   const isStandalone = action.fromStandalone ?? false;
 
   if (action.type === "nav") {
-    await showQuestBoard(player, action.tab, isStandalone);
+    await showQuestBoard(player, action.tab, isStandalone, false);
     return;
   }
 
   if (action.type === "refresh") {
     const success = handleRefresh(player);
-    await showQuestBoard(player, BOARD_TABS.AVAILABLE, isStandalone);
+    await showQuestBoard(player, BOARD_TABS.AVAILABLE, isStandalone, false);
     return;
   }
 
@@ -647,12 +657,11 @@ async function handleUiAction(player, action) {
 
       // FX: Rarity
       if (def.rarity === "legendary") {
-        player.playSound("random.totem", { pitch: 1.0 });
-        player.playSound("ambient.weather.thunder", { pitch: 0.8 });
+        player.playSound("quest.accept_legendary", { volume: 1.0, pitch: 1.0 });
         player.dimension.spawnParticle("minecraft:totem_particle", player.location);
         player.sendMessage("§6§l[LEGENDARY CONTRACT ACCEPTED]§r");
       } else if (def.rarity === "rare") {
-        player.playSound("random.levelup", { pitch: 1.5 });
+        player.playSound("quest.accept_rare", { volume: 1.0, pitch: 1.0 });
         player.dimension.spawnParticle("minecraft:villager_happy", player.location);
       } else {
         player.playSound("random.orb", { pitch: 1.0 });
@@ -728,14 +737,14 @@ async function showQuestDetails(player, questIndex, isStandalone = false) {
 
   // Decline or Cancel
   if (res.canceled || res.selection === 1) {
-    await showQuestBoard(player, BOARD_TABS.AVAILABLE, isStandalone);
+    await showQuestBoard(player, BOARD_TABS.AVAILABLE, isStandalone, false);
   }
 }
 
 async function showManageQuest(player, isStandalone = false) {
   const data = ensureQuestData(player);
   if (!data.active) {
-    await showQuestBoard(player, BOARD_TABS.ACTIVE, isStandalone);
+    await showQuestBoard(player, BOARD_TABS.ACTIVE, isStandalone, false);
     return;
   }
 
@@ -754,7 +763,7 @@ async function showManageQuest(player, isStandalone = false) {
 
   if (res.canceled || res.selection === 1) {
     // Button 2 (No) -> 1, or Canceled
-    await showQuestBoard(player, BOARD_TABS.ACTIVE, isStandalone);
+    await showQuestBoard(player, BOARD_TABS.ACTIVE, isStandalone, false);
     return;
   }
 
@@ -764,7 +773,7 @@ async function showManageQuest(player, isStandalone = false) {
       const c = getQuestColors(removed.rarity);
       player.sendMessage(`§eAbandoned: ${c.chat}${removed.title}§r`);
     }
-    await showQuestBoard(player, BOARD_TABS.ACTIVE, isStandalone);
+    await showQuestBoard(player, BOARD_TABS.ACTIVE, isStandalone, false);
   }
 }
 
@@ -1130,6 +1139,119 @@ function handleQuestTurnIn(player) {
 }
 
 /** -----------------------------
+ *  Quest Master NPC
+ *  ----------------------------- */
+
+/**
+ * Shows the Quest Master NPC dialog with tutorial/explanation content
+ * @param {import("@minecraft/server").Player} player
+ */
+function showQuestMasterDialog(player) {
+  const form = new ActionFormData()
+    .title("§5§lThe Quest Master")
+    .body(
+      "§7Greetings, adventurer! I am the keeper of the Quest Board.\n\n" +
+      "§fSelect a topic to learn more:"
+    )
+    .button("§2How Quests Work", TEXTURES.DEFAULT)
+    .button("§eAbout Super Points (SP)", TEXTURES.SP_COIN)
+    .button("§bRerolls & Refreshes", TEXTURES.REFRESH)
+    .button("§6Legendary Quests", TEXTURES.LEGENDARY)
+    .button("§aOpen Quest Board", TEXTURES.CATEGORY_UNDEAD)
+    .button("§7Nevermind");
+
+  form.show(player).then((response) => {
+    if (response.canceled || response.selection === 5) return;
+
+    switch (response.selection) {
+      case 0:
+        showTutorialPage(player, "how_quests_work");
+        break;
+      case 1:
+        showTutorialPage(player, "super_points");
+        break;
+      case 2:
+        showTutorialPage(player, "rerolls");
+        break;
+      case 3:
+        showTutorialPage(player, "legendary");
+        break;
+      case 4:
+        // Open the actual quest board
+        showQuestBoard(player, BOARD_TABS.AVAILABLE, true);
+        break;
+    }
+  });
+}
+
+/**
+ * Shows a specific tutorial page as a MessageForm (OK to go back)
+ * @param {import("@minecraft/server").Player} player
+ * @param {string} topic
+ */
+function showTutorialPage(player, topic) {
+  const tutorials = {
+    how_quests_work: {
+      title: "§2How Quests Work",
+      body:
+        "§fThe Quest Board offers you §e3 personal quests§f that refresh every §b24 hours§f.\n\n" +
+        "§7• §fYou can have §eONE active quest§f at a time\n" +
+        "§7• §fComplete it by meeting the goal (kill mobs, mine blocks, or gather items)\n" +
+        "§7• §fReturn to the board to §aturn in§f your completed quest\n" +
+        "§7• §fCompleting all 3 quests triggers a §dbonus refresh§f!\n\n" +
+        "§8Tip: Sneak + interact with the board to place blocks nearby."
+    },
+    super_points: {
+      title: "§eSuper Points (SP)",
+      body:
+        "§6SP§f is the currency of the Quest Board.\n\n" +
+        "§7• §fEarn SP by completing quests\n" +
+        "§7• §fHarder quests (§brare§f, §6legendary§f) give more SP\n" +
+        "§7• §fSP is tracked on the §dLeaderboard§f tab\n" +
+        "§7• §fSpend SP on §cpaid rerolls§f when your free one is used\n\n" +
+        "§8Future: SP will unlock rewards, cosmetics, and more!"
+    },
+    rerolls: {
+      title: "§bRerolls & Refreshes",
+      body:
+        "§fDon't like your available quests? You have options:\n\n" +
+        "§a§lFree Reroll§r\n" +
+        "§7You get §eONE free reroll§7 per 24-hour cycle. Use it wisely!\n\n" +
+        "§c§lPaid Rerolls§r\n" +
+        "§7After your free reroll, you can spend §6SP§7 for more:\n" +
+        "§7• 1st paid: §e50 SP§7 → 2nd: §e50 SP§7 → 3rd: §e100 SP§7...\n\n" +
+        "§d§l24-Hour Refresh§r\n" +
+        "§7Every 24 hours, your quests fully refresh and rerolls reset."
+    },
+    legendary: {
+      title: "§6§lLegendary Quests",
+      body:
+        "§6Legendary quests§f are rare and highly rewarding!\n\n" +
+        "§7• §fThey appear randomly in your quest pool\n" +
+        "§7• §fThey have §cdifficult goals§f but §amassive SP rewards§f\n" +
+        "§7• §fSome grant §dspecial item rewards§f\n" +
+        "§7• §fThey're marked with a §6golden icon§f\n\n" +
+        "§8If you see one, consider saving your reroll for something else!"
+    }
+  };
+
+  const page = tutorials[topic];
+  if (!page) return;
+
+  const msg = new MessageFormData()
+    .title(page.title)
+    .body(page.body)
+    .button1("§aBack to Quest Master")
+    .button2("§7Close");
+
+  msg.show(player).then((response) => {
+    if (response.selection === 0) {
+      showQuestMasterDialog(player);
+    }
+  });
+}
+
+/** -----------------------------
  *  Interaction & Wiring
  *  ----------------------------- */
 
@@ -1240,6 +1362,48 @@ function bootstrap() {
   wireEntityHitTracking();
   registerSafeZoneEvents();
   AtmosphereManager.init();
+
+  // Quest Master NPC Interaction
+  system.afterEvents.scriptEventReceive.subscribe((ev) => {
+    if (ev.id !== "quest:npc_interact") return;
+
+    // Find the player who triggered this (nearest player to the entity)
+    const entity = ev.sourceEntity;
+    if (!entity) return;
+
+    // Get nearest player within 3 blocks
+    const nearbyPlayers = entity.dimension.getPlayers({
+      location: entity.location,
+      maxDistance: 3
+    });
+
+    if (nearbyPlayers.length === 0) return;
+    const player = nearbyPlayers[0];
+
+    // Debounce check (reuse existing pattern)
+    const now = Date.now();
+    const lastTime = lastInteractTime.get(player.name + "_npc") || 0;
+    if (now - lastTime < 500) return;
+    lastInteractTime.set(player.name + "_npc", now);
+
+    // Auto-name the Quest Master if not already named
+    if (!entity.nameTag || entity.nameTag === "") {
+      entity.nameTag = "§5Quest Master";
+    }
+
+    // Play Quest Master greet sound
+    player.playSound("ui.npc_questmaster_greet", { volume: 0.8, pitch: 1.0 });
+
+    // Occasionally play idle sound too (20% chance for flavor)
+    if (Math.random() < 0.2) {
+      system.runTimeout(() => {
+        player.playSound("ui.npc_questmaster_idle", { volume: 0.5, pitch: 1.0 });
+      }, 15); // Slight delay (0.75 sec)
+    }
+
+    // Show dialog
+    showQuestMasterDialog(player);
+  });
 
   system.runInterval(() => {
     // Clean up entity hit map

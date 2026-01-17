@@ -1,0 +1,96 @@
+{
+  "format_version": "1.14.0",
+  "sound_definitions": {
+    "quest.board_ambient": {
+      "category": "neutral",
+      "sounds": [
+        {
+          "name": "sounds/quest/magical_beacon",
+          "volume": 1.0,
+          "load_on_low_memory": true
+        }
+      ]
+    },
+    "quest.board_chime": {
+      "category": "neutral",
+      "sounds": [
+        {
+          "name": "sounds/quest/magical_beacon",
+          "volume": 0.8,
+          "pitch": 1.3,
+          "load_on_low_memory": true
+        }
+      ]
+    },
+    "ui.available_open": {
+      "category": "ui",
+      "sounds": [
+        {
+          "name": "sounds/ui/available_open",
+          "volume": 1.0,
+          "load_on_low_memory": true
+        }
+      ]
+    },
+    "ui.active_open": {
+      "category": "ui",
+      "sounds": [
+        {
+          "name": "sounds/ui/active_open",
+          "volume": 1.0,
+          "load_on_low_memory": true
+        }
+      ]
+    },
+    "ui.legends_open": {
+      "category": "ui",
+      "sounds": [
+        {
+          "name": "sounds/ui/legends_open",
+          "volume": 1.0,
+          "load_on_low_memory": true
+        }
+      ]
+    },
+    "ui.npc_questmaster_greet": {
+      "category": "neutral",
+      "sounds": [
+        {
+          "name": "sounds/ui/npc_questmaster_greet",
+          "volume": 1.0,
+          "load_on_low_memory": true
+        }
+      ]
+    },
+    "ui.npc_questmaster_idle": {
+      "category": "neutral",
+      "sounds": [
+        {
+          "name": "sounds/ui/npc_questmaster_idle",
+          "volume": 0.8,
+          "load_on_low_memory": true
+        }
+      ]
+    },
+    "quest.accept_rare": {
+      "category": "player",
+      "sounds": [
+        {
+          "name": "sounds/ui/quest_accept_rare",
+          "volume": 1.0,
+          "load_on_low_memory": true
+        }
+      ]
+    },
+    "quest.accept_legendary": {
+      "category": "player",
+      "sounds": [
+        {
+          "name": "sounds/ui/quest_accept_legendary",
+          "volume": 1.0,
+          "load_on_low_memory": true
+        }
+      ]
+    }
+  }
+}

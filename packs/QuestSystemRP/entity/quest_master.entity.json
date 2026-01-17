@@ -1,0 +1,32 @@
+{
+  "format_version": "1.10.0",
+  "minecraft:client_entity": {
+    "description": {
+      "identifier": "quest:quest_master",
+      "materials": {
+        "default": "entity_alphatest"
+      },
+      "textures": {
+        "default": "textures/entity/quest_master"
+      },
+      "geometry": {
+        "default": "geometry.villager_v2"
+      },
+      "render_controllers": [
+        "controller.render.quest_master"
+      ],
+      "spawn_egg": {
+        "base_color": "#4a235a",
+        "overlay_color": "#f4d03f"
+      },
+      "animations": {
+        "look_at_target": "animation.humanoid.look_at_target.default"
+      },
+      "scripts": {
+        "animate": [
+          "look_at_target"
+        ]
+      }
+    }
+  }
+}

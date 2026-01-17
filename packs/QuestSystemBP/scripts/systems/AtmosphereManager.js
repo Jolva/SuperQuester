@@ -41,13 +41,25 @@ export class AtmosphereManager {
           z: boardLoc.z + 0.5
         });
 
-        // --- AUDIO ---
-        // Base Hum
-        player.playSound("beacon.ambient", { volume: 1.5, pitch: 1.0 });
+        // --- AUDIO (Distance-based volume falloff) ---
+        // Full volume at <1 block, 10% quieter per block away
+        // Formula: volume = baseVolume * (1 - (distance * 0.1))
+        // Clamped to minimum 0.1 to prevent complete silence at edge
 
-        // Accent Chime (Once per second -> Every 20 ticks)
+        const MAX_VOLUME = 1.05;  // Volume when standing right at the board (reduced 30%)
+        const FALLOFF_RATE = 0.10;  // 10% reduction per block
+        const MIN_VOLUME = 0.1;  // Minimum volume at edge of zone
+
+        // Calculate volume based on distance (closer = louder)
+        const volumeMultiplier = Math.max(MIN_VOLUME, 1 - (dist * FALLOFF_RATE));
+        const currentVolume = MAX_VOLUME * volumeMultiplier;
+
+        // Base Hum (custom magical sound)
+        player.playSound("quest.board_ambient", { volume: currentVolume, pitch: 1.0 });
+
+        // Accent Chime (Once per second -> Every 20 ticks, slightly quieter)
         if (system.currentTick % 20 === 0) {
-          player.playSound("conduit.activate", { volume: 0.5, pitch: 1.5 });
+          player.playSound("quest.board_chime", { volume: currentVolume * 0.6, pitch: 1.3 });
         }
       }
     }
