@@ -94,6 +94,7 @@ python tools/cache_buster.py
 | `quest.abandon` | `sounds/ui/quest_abandon` | Quest abandoned | `main.js:handleQuestAbandon()` |
 | `quest.complete_single` | `sounds/ui/quest_complete_single` | Individual quest turn-in | `main.js:handleQuestTurnIn()` |
 | `quest.complete_all` | `sounds/ui/quest_complete_all` | All quests complete fanfare | `main.js:triggerQuestClearCelebration()` |
+| `quest.reroll` | `sounds/ui/quest_reroll` | Successful quest reroll (free or paid) | `main.js:handleRefresh()` |
 
 ---
 
@@ -171,7 +172,7 @@ ffmpeg -i input.mp3 -ac 1 -ar 44100 -c:a libvorbis -q:a 4 output.ogg
 See `quest_board_audio_pass_v_1.md` for the full design wishlist. Still to implement:
 
 - [ ] `quest_accept_common.ogg` — Common quest acceptance
-- [ ] `quest_reroll.ogg` — Successful reroll
+- [x] `quest_reroll.ogg` — Successful reroll ✅
 - [ ] `quest_error.ogg` — Not enough SP / error
 - [ ] `quest_progress_tick.ogg` — Kill/gather increment
 - [x] `quest_complete_single.ogg` — Individual quest complete ✅

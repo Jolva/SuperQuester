@@ -162,6 +162,16 @@
         }
       ]
     },
+    "quest.reroll": {
+      "category": "ui",
+      "sounds": [
+        {
+          "name": "sounds/ui/quest_reroll",
+          "volume": 1.0,
+          "load_on_low_memory": true
+        }
+      ]
+    },
     "questboard.music.town": {
       "category": "music",
       "sounds": [

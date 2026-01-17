@@ -403,7 +403,7 @@ function handleRefresh(player) {
     PersistenceManager.saveQuestData(player, data);
 
     player.sendMessage("§a✓ Used free reroll! Complete all 3 quests to earn another.§r");
-    player.playSound("random.orb", { pitch: 1.2 });
+    player.playSound("quest.reroll", { volume: 0.9, pitch: 1.0 });
     return true;
   }
 
@@ -435,7 +435,7 @@ function handleRefresh(player) {
 
   const nextPrice = calculateRerollPrice(data.paidRerollsThisCycle);
   player.sendMessage(`§a✓ Rerolled for ${price} SP! Next reroll: ${nextPrice} SP§r`);
-  player.playSound("random.orb", { pitch: 1.0 });
+  player.playSound("quest.reroll", { volume: 0.9, pitch: 1.0 });
 
   return true;
 }
