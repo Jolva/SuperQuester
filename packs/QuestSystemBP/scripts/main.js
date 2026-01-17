@@ -1,6 +1,5 @@
-import { world, system, ItemStack } from "@minecraft/server";
+import { world, system, ItemStack, DisplaySlotId } from "@minecraft/server";
 import { ActionFormData, MessageFormData } from "@minecraft/server-ui";
-import { ensureObjective } from "./scoreboard.js";
 import { getMobType } from "./quests/mobTypes.js";
 import { CONFIG } from "./config.js";
 import { registerSafeZoneEvents, handleSafeZoneCommand } from "./safeZone.js";
@@ -58,8 +57,10 @@ world.afterEvents.playerSpawn.subscribe((ev) => {
   }, 5); // Small delay to ensure player is fully loaded
 
   // Register player name for leaderboard (fixes offline player name display)
+  // Also initialize SP (handles backup recovery if scoreboard was wiped)
   system.runTimeout(() => {
     registerPlayerName(player);
+    initializePlayerSP(player);
   }, 10); // Delay to ensure scoreboard identity is ready
 
   // Load quest data
@@ -93,8 +94,8 @@ world.afterEvents.playerLeave.subscribe((ev) => {
 const FALLBACK_COMMAND = "!quests";
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 
-const SCOREBOARD_OBJECTIVE_ID = "TownQuests";
-const SCOREBOARD_OBJECTIVE_DISPLAY = "Town Quests";
+const SCOREBOARD_OBJECTIVE_ID = "SuperPoints";
+const SCOREBOARD_OBJECTIVE_DISPLAY = "§e★ SP";
 
 /**
  * Textures
@@ -287,6 +288,94 @@ function lookupPlayerName(participantId) {
 }
 
 /** -----------------------------
+ *  Super Points (SP) Helpers
+ *  ----------------------------- */
+
+/**
+ * Gets a player's current SP balance.
+ * Reads from scoreboard (authoritative source).
+ * 
+ * @param {import("@minecraft/server").Player} player
+ * @returns {number}
+ */
+function getSP(player) {
+  const objective = world.scoreboard.getObjective(SCOREBOARD_OBJECTIVE_ID);
+  if (!objective || !player.scoreboardIdentity) return 0;
+  return objective.getScore(player.scoreboardIdentity) ?? 0;
+}
+
+/**
+ * Modifies a player's Super Points balance.
+ * Updates both the scoreboard (authoritative) and dynamic property backup.
+ * 
+ * @param {import("@minecraft/server").Player} player - The player to modify
+ * @param {number} delta - Amount to add (positive) or subtract (negative)
+ * @returns {number} The new balance
+ */
+function modifySP(player, delta) {
+  const objective = world.scoreboard.getObjective(SCOREBOARD_OBJECTIVE_ID);
+  if (!objective) {
+    console.warn("[SP] Cannot modify SP - objective not found");
+    return 0;
+  }
+
+  // Get current balance
+  let current = 0;
+  if (player.scoreboardIdentity) {
+    current = objective.getScore(player.scoreboardIdentity) ?? 0;
+  }
+
+  // Calculate new balance (floor at 0)
+  const newBalance = Math.max(0, current + delta);
+
+  // Update scoreboard
+  objective.setScore(player, newBalance);
+
+  // Update backup in dynamic properties
+  const data = PersistenceManager.loadQuestData(player);
+  if (data) {
+    data.currentSP = newBalance;
+    PersistenceManager.saveQuestData(player, data);
+  }
+
+  return newBalance;
+}
+
+/**
+ * Initializes a player's SP on join.
+ * Handles recovery from backup if scoreboard was wiped.
+ * 
+ * @param {import("@minecraft/server").Player} player
+ */
+function initializePlayerSP(player) {
+  const objective = world.scoreboard.getObjective(SCOREBOARD_OBJECTIVE_ID);
+  if (!objective) return;
+
+  const data = PersistenceManager.loadQuestData(player);
+
+  // Get scoreboard value (may need identity to exist first)
+  let scoreboardSP = 0;
+  if (player.scoreboardIdentity) {
+    scoreboardSP = objective.getScore(player.scoreboardIdentity) ?? 0;
+  }
+
+  // Get backup value
+  const backupSP = data?.currentSP ?? 0;
+
+  // Recovery: if scoreboard is 0 but backup has value, restore
+  if (scoreboardSP === 0 && backupSP > 0) {
+    objective.setScore(player, backupSP);
+    console.warn(`[SuperQuester] Restored ${player.name}'s SP from backup: ${backupSP}`);
+  }
+
+  // Ensure backup is in sync (covers new players and normal cases)
+  if (data && scoreboardSP > 0 && backupSP !== scoreboardSP) {
+    data.currentSP = scoreboardSP;
+    PersistenceManager.saveQuestData(player, data);
+  }
+}
+
+/** -----------------------------
  *  State helpers
  *  ----------------------------- */
 
@@ -319,7 +408,7 @@ function ensureQuestData(player) {
         freeRerollAvailable: true,
         paidRerollsThisCycle: 0,
         lifetimeCompleted: 0,
-        lifetimeSPEarned: 0
+        currentSP: 0  // Backup of SP balance (synced with scoreboard)
       };
 
       // Clear old data
@@ -337,7 +426,7 @@ function ensureQuestData(player) {
         freeRerollAvailable: true,  // Start with 1 free reroll
         paidRerollsThisCycle: 0,
         lifetimeCompleted: 0,
-        lifetimeSPEarned: 0
+        currentSP: 0  // Backup of SP balance (synced with scoreboard)
       };
 
       PersistenceManager.saveQuestData(player, data);
@@ -409,14 +498,7 @@ function handleRefresh(player) {
 
   // CASE 2: Paid reroll
   const price = calculateRerollPrice(data.paidRerollsThisCycle);
-  const objective = world.scoreboard.getObjective(SCOREBOARD_OBJECTIVE_ID);
-
-  if (!objective || !player.scoreboardIdentity) {
-    player.sendMessage("§cError accessing scoreboard.§r");
-    return false;
-  }
-
-  const currentSP = objective.getScore(player.scoreboardIdentity) ?? 0;
+  const currentSP = getSP(player);
 
   if (currentSP < price) {
     player.sendMessage(`§cNot enough SP! Need ${price}, have ${currentSP}.§r`);
@@ -424,8 +506,9 @@ function handleRefresh(player) {
     return false;
   }
 
-  // Deduct SP and refresh
-  objective.setScore(player.scoreboardIdentity, currentSP - price);
+  // Deduct SP using centralized helper (updates both scoreboard and backup)
+  modifySP(player, -price);
+
   data.paidRerollsThisCycle += 1;
   data.available = QuestGenerator.generateDailyQuests(3);
   data.active = null;
@@ -1236,24 +1319,12 @@ function handleQuestTurnIn(player) {
 
   // Award rewards
   const reward = quest.reward;
+  const spEarned = reward?.scoreboardIncrement ?? 0;
+
   if (reward) {
-    // Scoreboard points
-    if (reward.scoreboardIncrement) {
-      const objective = world.scoreboard.getObjective(SCOREBOARD_OBJECTIVE_ID);
-      try {
-        if (objective && player.scoreboardIdentity) {
-          // Use API if player already has a scoreboard identity
-          objective.addScore(player.scoreboardIdentity, reward.scoreboardIncrement);
-        } else {
-          // Fallback: player.scoreboardIdentity is undefined if they've never been on a scoreboard.
-          // Use command to ensure the score is always added.
-          player.runCommandAsync(`scoreboard players add @s ${SCOREBOARD_OBJECTIVE_ID} ${reward.scoreboardIncrement}`).catch((e) => {
-            console.warn("Failed to add score via command: " + e);
-          });
-        }
-      } catch (e) {
-        console.warn("Failed to update score: " + e);
-      }
+    // Award SP using centralized helper (updates both scoreboard and backup)
+    if (spEarned > 0) {
+      modifySP(player, spEarned);
     }
 
     // Items
@@ -1276,9 +1347,7 @@ function handleQuestTurnIn(player) {
   }
 
   // Update stats
-  const spEarned = reward?.scoreboardIncrement ?? 0;
   data.lifetimeCompleted += 1;
-  data.lifetimeSPEarned += spEarned;
 
   // Clear active quest
   data.active = null;
@@ -1549,7 +1618,18 @@ function wireInteractions() {
 }
 
 function bootstrap() {
-  ensureObjective(SCOREBOARD_OBJECTIVE_ID, "dummy", SCOREBOARD_OBJECTIVE_DISPLAY);
+  // Initialize SuperPoints scoreboard objective
+  let objective = world.scoreboard.getObjective(SCOREBOARD_OBJECTIVE_ID);
+  if (!objective) {
+    objective = world.scoreboard.addObjective(SCOREBOARD_OBJECTIVE_ID, SCOREBOARD_OBJECTIVE_DISPLAY);
+  }
+  // Display on sidebar so players can see their SP
+  try {
+    world.scoreboard.setObjectiveAtDisplaySlot(DisplaySlotId.Sidebar, { objective });
+  } catch (e) {
+    // May fail if already set, that's fine
+  }
+
   wireInteractions();
   world.afterEvents.entityDie.subscribe(handleEntityDeath);
   world.afterEvents.playerBreakBlock.subscribe(handleBlockBreak);
@@ -1597,6 +1677,67 @@ function bootstrap() {
 
     // Show dialog
     showQuestMasterDialog(player);
+  });
+
+  // === Admin Command: sq:givesp ===
+  // Usage: /scriptevent sq:givesp <player|@s> <amount>
+  system.afterEvents.scriptEventReceive.subscribe((ev) => {
+    if (ev.id !== "sq:givesp") return;
+
+    const source = ev.sourceEntity;
+    const args = ev.message.trim().split(/\s+/);
+
+    // Validate args
+    if (args.length < 2) {
+      if (source) {
+        source.sendMessage("§cUsage: /scriptevent sq:givesp <player|@s> <amount>");
+      }
+      return;
+    }
+
+    const [targetArg, amountArg] = args;
+    const amount = parseInt(amountArg, 10);
+
+    if (isNaN(amount)) {
+      if (source) {
+        source.sendMessage("§cInvalid amount. Must be an integer.");
+      }
+      return;
+    }
+
+    // Resolve target player
+    let targetPlayer;
+    if (targetArg === "@s") {
+      if (!source) {
+        console.warn("[SuperQuester] @s used from non-player source");
+        return;
+      }
+      targetPlayer = source;
+    } else {
+      // Find player by name
+      targetPlayer = world.getAllPlayers().find(p => p.name === targetArg);
+      if (!targetPlayer) {
+        if (source) {
+          source.sendMessage(`§cPlayer "${targetArg}" not found or not online.`);
+        }
+        return;
+      }
+    }
+
+    // Modify SP
+    const oldBalance = getSP(targetPlayer);
+    const newBalance = modifySP(targetPlayer, amount);
+    const actualDelta = newBalance - oldBalance;
+
+    // Admin feedback
+    const sign = actualDelta >= 0 ? "+" : "";
+    const feedback = `§a[SP Admin] §r${targetPlayer.name}: ${oldBalance} → ${newBalance} (${sign}${actualDelta})`;
+
+    if (source) {
+      source.sendMessage(feedback);
+    } else {
+      console.log(feedback);
+    }
   });
 
   system.runInterval(() => {
