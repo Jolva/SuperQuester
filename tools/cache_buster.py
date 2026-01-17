@@ -218,39 +218,11 @@ def get_online_players():
 
 
 def send_server_command(command):
-    """Send a command to the running Bedrock server via stdin"""
-    try:
-        # Find the server process
-        result = subprocess.run(
-            ["tasklist", "/FI", "IMAGENAME eq bedrock_server.exe", "/FO", "CSV"],
-            capture_output=True,
-            text=True
-        )
-        
-        if "bedrock_server.exe" not in result.stdout:
-            return False
-        
-        # Use PowerShell to send input to the process's console window
-        # This sends a 'say' command to broadcast to all players
-        ps_command = f'''
-        Add-Type -TypeDefinition @"
-        using System;
-        using System.Runtime.InteropServices;
-        public class Win32 {{
-            [DllImport("user32.dll")]
-            public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
-            [DllImport("user32.dll")]
-            public static extern bool SetForegroundWindow(IntPtr hWnd);
-        }}
-"@
-        # Just use taskkill approach - the say command approach is complex
-        '''
-        # For simplicity, we'll just print the warning - actual stdin injection is complex
-        return True
-        
-    except Exception as e:
-        print(f"⚠️  Could not send command: {e}")
-        return False
+    """Placeholder - server command sending not implemented"""
+    # Note: Sending commands to a running Bedrock server from Python is complex.
+    # For now, this just returns True as a placeholder.
+    # Future options: RCON, named pipes, or manual entry.
+    return True
 
 
 def kill_running_server():
@@ -304,25 +276,22 @@ def kill_running_server():
                 
             elif choice == "2":
                 print("")
-                print("📢 Sending countdown warning to players...")
-                print("   (Make sure your server console is visible)")
+                print("📢 30-second countdown mode")
+                print("   (Copy/paste these commands into your server console)")
                 print("")
                 
-                # We'll create a script that types into the console
-                # For Windows, we can use PowerShell to send keystrokes
                 warnings = [
-                    (30, "say §c⚠ SERVER RESTARTING IN 30 SECONDS! ⚠"),
-                    (20, "say §e⚠ Server restarting in 20 seconds..."),
-                    (10, "say §e⚠ Server restarting in 10 seconds..."),
-                    (5, "say §c⚠ Server restarting in 5 seconds! Save your progress!"),
-                    (3, "say §c3..."),
-                    (2, "say §c2..."),
-                    (1, "say §c1..."),
-                    (0, "say §4⚠ SERVER RESTARTING NOW! ⚠"),
+                    (30, "say [!] SERVER RESTARTING IN 30 SECONDS!"),
+                    (20, "say [!] Server restarting in 20 seconds..."),
+                    (10, "say [!] Server restarting in 10 seconds..."),
+                    (5, "say [!] Server restarting in 5 seconds! Save your progress!"),
+                    (3, "say 3..."),
+                    (2, "say 2..."),
+                    (1, "say 1..."),
+                    (0, "say [!] SERVER RESTARTING NOW!"),
                 ]
                 
                 print("⏱️  Starting 30-second countdown...")
-                print("   Please manually type these commands in your server console:")
                 print("")
                 
                 last_time = 30
@@ -332,7 +301,7 @@ def kill_running_server():
                         time.sleep(wait_time)
                     last_time = seconds_left
                     
-                    # Print what to type (user can copy-paste or we show countdown)
+                    # Print the command for user to manually type
                     print(f"   [{seconds_left:2d}s] {command}")
                 
                 time.sleep(1)

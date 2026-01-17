@@ -7,10 +7,10 @@
         "default": "entity_alphatest"
       },
       "textures": {
-        "default": "textures/entity/quest_master"
+        "default": "textures/entity/atlas"
       },
       "geometry": {
-        "default": "geometry.villager_v2"
+        "default": "geometry.atlas"
       },
       "render_controllers": [
         "controller.render.quest_master"

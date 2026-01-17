@@ -17,6 +17,7 @@ packs/QuestSystemRP/
 │       ├── available_open.ogg
 │       ├── active_open.ogg
 │       ├── legends_open.ogg
+│       ├── legends_first_place.ogg
 │       ├── npc_questmaster_greet.ogg
 │       ├── npc_questmaster_idle.ogg
 │       ├── quest_accept_rare.ogg
@@ -85,10 +86,14 @@ python tools/cache_buster.py
 | `ui.available_open` | `sounds/ui/available_open` | Open Available menu | `main.js:showQuestBoard()` |
 | `ui.active_open` | `sounds/ui/active_open` | Open Active menu | `main.js:showQuestBoard()` |
 | `ui.legends_open` | `sounds/ui/legends_open` | Open Leaderboard menu | `main.js:showQuestBoard()` |
+| `ui.legends_first_place` | `sounds/ui/legends_first_place` | #1 ranked player opens Leaderboard (2s delay, plays for nearby players) | `main.js:showQuestBoard()` |
 | `ui.npc_questmaster_greet` | `sounds/ui/npc_questmaster_greet` | Talk to Quest Master | `main.js` (NPC handler) |
 | `ui.npc_questmaster_idle` | `sounds/ui/npc_questmaster_idle` | Quest Master flavor (20%) | `main.js` (NPC handler) |
 | `quest.accept_rare` | `sounds/ui/quest_accept_rare` | Accept Rare quest | `main.js:handleUiAction()` |
 | `quest.accept_legendary` | `sounds/ui/quest_accept_legendary` | Accept Legendary quest | `main.js:handleUiAction()` |
+| `quest.abandon` | `sounds/ui/quest_abandon` | Quest abandoned | `main.js:handleQuestAbandon()` |
+| `quest.complete_single` | `sounds/ui/quest_complete_single` | Individual quest turn-in | `main.js:handleQuestTurnIn()` |
+| `quest.complete_all` | `sounds/ui/quest_complete_all` | All quests complete fanfare | `main.js:triggerQuestClearCelebration()` |
 
 ---
 
@@ -169,9 +174,10 @@ See `quest_board_audio_pass_v_1.md` for the full design wishlist. Still to imple
 - [ ] `quest_reroll.ogg` — Successful reroll
 - [ ] `quest_error.ogg` — Not enough SP / error
 - [ ] `quest_progress_tick.ogg` — Kill/gather increment
-- [ ] `quest_complete_single.ogg` — Individual quest complete
-- [ ] `quest_complete_all.ogg` — All quests complete fanfare
-- [ ] `quest_abandon.ogg` — Quest abandoned
+- [x] `quest_complete_single.ogg` — Individual quest complete ✅
+- [x] `quest_complete_all.ogg` — All quests complete fanfare ✅
+- [x] `quest_abandon.ogg` — Quest abandoned ✅
+
 
 ---
 

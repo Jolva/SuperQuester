@@ -52,6 +52,16 @@
         }
       ]
     },
+    "ui.legends_first_place": {
+      "category": "neutral",
+      "sounds": [
+        {
+          "name": "sounds/ui/legends_first_place",
+          "volume": 1.0,
+          "load_on_low_memory": true
+        }
+      ]
+    },
     "ui.npc_questmaster_greet": {
       "category": "neutral",
       "sounds": [
@@ -118,6 +128,46 @@
         {
           "name": "sounds/ui/progress_tick_5",
           "volume": 0.6,
+          "load_on_low_memory": true
+        }
+      ]
+    },
+    "quest.abandon": {
+      "category": "ui",
+      "sounds": [
+        {
+          "name": "sounds/ui/quest_abandon",
+          "volume": 0.8,
+          "load_on_low_memory": true
+        }
+      ]
+    },
+    "quest.complete_single": {
+      "category": "player",
+      "sounds": [
+        {
+          "name": "sounds/ui/quest_complete_single",
+          "volume": 1.0,
+          "load_on_low_memory": true
+        }
+      ]
+    },
+    "quest.complete_all": {
+      "category": "player",
+      "sounds": [
+        {
+          "name": "sounds/ui/quest_complete_all",
+          "volume": 1.0,
+          "load_on_low_memory": true
+        }
+      ]
+    },
+    "questboard.music.town": {
+      "category": "music",
+      "sounds": [
+        {
+          "name": "sounds/music/town/superquester-theme",
+          "volume": 0.75,
           "load_on_low_memory": true
         }
       ]

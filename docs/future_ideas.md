@@ -48,17 +48,13 @@ Summoning Totem: An item that spawns a mini-boss (for a specific quest) when pla
 5. 🎰 The Gacha System (Economy & Rewards)
 Current Status: Concept Phase
 
-Quest Points (QP):
+Super Points (SP):
 - A virtual currency earned by completing quests (stored in a Scoreboard).
 - Displayed on the sidebar or below the user's name.
 
-Board Refresh (The "Mulligan"):
-- Instead of waiting 24 hours (or using admin commands), players can spend QP to "Refresh" the daily quest board immediately.
-- "Don't like these quests? Pay 50 QP to reroll!"
-
 Gacha Reward Capsules:
-- Players spend QP to buy "Mystery Capsules" (Spawn Eggs or Crates).
+- Players spend SP to buy "Mystery Capsules" (Spawn Eggs or Crates).
 - Tiers:
-  - Common (100 QP): Food, basic resources, iron.
-  - Rare (300 QP): Enchanted books, diamond gear, music discs.
-  - Legendary (1000 QP): Custom pets, particle trails, mending books.
+  - Common (100 SP): Food, basic resources, iron.
+  - Rare (300 SP): Enchanted books, diamond gear, music discs.
+  - Legendary (1000 SP): Custom pets, particle trails, mending books.

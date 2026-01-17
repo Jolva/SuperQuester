@@ -1,6 +1,8 @@
 {
-  "entity_sounds": {},
-  "individual_event_sounds": {},
-  "block_sounds": {},
-  "interactive_sounds": {}
+	"entity_sounds": {
+		"entities": {}
+	},
+	"individual_event_sounds": {},
+	"block_sounds": {},
+	"interactive_sounds": {}
 }

@@ -21,6 +21,19 @@ const HUB_SPAWN_LOCATION = { x: 84, y: 78, z: -278 };
 // Rotation: yaw = horizontal (0=south, 90=west, 180=north, -90=east), pitch = vertical
 const HUB_SPAWN_ROTATION = { x: 0, y: 90 }; // Facing West toward the quest board
 
+// === TOWN MUSIC ZONE CONFIGURATION ===
+// Town center coordinates (same as Quest Board / Safe Zone center)
+// Change these if your town center moves!
+const TOWN_CENTER = { x: 72, y: 75, z: -278 };
+const TOWN_RADIUS = 40; // blocks
+
+// Music track configuration
+// Change TRACK_DURATION_TICKS if you change the audio file length!
+// Current track: ~45 seconds. Replay at 44 seconds (880 ticks) for seamless loop.
+const TOWN_MUSIC_SOUND_ID = "questboard.music.town";
+const TRACK_DURATION_TICKS = 880; // ~44 seconds (slight overlap for seamless loop)
+const MUSIC_CHECK_INTERVAL = 10; // Check every 10 ticks (0.5 seconds)
+
 // Log on world load (Kept from original main.js)
 world.afterEvents.worldInitialize.subscribe(() => {
   console.warn('Quest System BP loaded successfully');
@@ -44,6 +57,11 @@ world.afterEvents.playerSpawn.subscribe((ev) => {
     }
   }, 5); // Small delay to ensure player is fully loaded
 
+  // Register player name for leaderboard (fixes offline player name display)
+  system.runTimeout(() => {
+    registerPlayerName(player);
+  }, 10); // Delay to ensure scoreboard identity is ready
+
   // Load quest data
   const quests = PersistenceManager.loadQuests(player);
 
@@ -56,6 +74,12 @@ world.afterEvents.playerSpawn.subscribe((ev) => {
       updateQuestHud(player, activeQuest);
     }
   }
+});
+
+// Clean up music state when player leaves
+world.afterEvents.playerLeave.subscribe((ev) => {
+  const playerId = ev.playerId;
+  playerMusicState.delete(playerId);
 });
 
 // Initialize Daily Quests (Global Daily Quests - REMOVED)
@@ -178,6 +202,89 @@ const lastHitPlayerByEntityId = new Map();
 
 // UI State: Track which tab the player is viewing
 const playerTabState = new Map();
+
+// === TOWN MUSIC ZONE STATE ===
+// Tracks per-player music state: { inZone: boolean, nextReplayTick: number }
+const playerMusicState = new Map();
+
+// === PLAYER NAME REGISTRY ===
+// Stores player names in world dynamic properties so leaderboard can display
+// correct names even when players are offline.
+const PLAYER_NAME_REGISTRY_KEY = "superquester:player_names";
+
+/**
+ * Loads the player name registry from world dynamic properties.
+ * @returns {Object} Map of scoreboard participant ID -> player name
+ */
+function loadPlayerNameRegistry() {
+  try {
+    const data = world.getDynamicProperty(PLAYER_NAME_REGISTRY_KEY);
+    if (typeof data === 'string') {
+      return JSON.parse(data);
+    }
+  } catch (e) {
+    console.warn(`[Registry] Failed to load player name registry: ${e}`);
+  }
+  return {};
+}
+
+/**
+ * Saves the player name registry to world dynamic properties.
+ * @param {Object} registry - Map of scoreboard participant ID -> player name
+ */
+function savePlayerNameRegistry(registry) {
+  try {
+    world.setDynamicProperty(PLAYER_NAME_REGISTRY_KEY, JSON.stringify(registry));
+  } catch (e) {
+    console.warn(`[Registry] Failed to save player name registry: ${e}`);
+  }
+}
+
+/**
+ * Registers a player's name in the registry using their scoreboard identity.
+ * Should be called when a player joins/spawns.
+ * @param {import("@minecraft/server").Player} player
+ */
+function registerPlayerName(player) {
+  if (!player || !player.isValid()) return;
+
+  // We need the player to have a scoreboard identity to map correctly.
+  // If they don't have one yet, we'll create it by adding 0 points.
+  const objective = world.scoreboard.getObjective(SCOREBOARD_OBJECTIVE_ID);
+  if (!objective) return;
+
+  try {
+    // Ensure player has a scoreboard identity by adding 0 if they don't have one
+    if (!player.scoreboardIdentity) {
+      player.runCommandAsync(`scoreboard players add @s ${SCOREBOARD_OBJECTIVE_ID} 0`).catch(() => { });
+      // The identity won't be available until next tick, so we'll try again
+      system.runTimeout(() => registerPlayerName(player), 5);
+      return;
+    }
+
+    const registry = loadPlayerNameRegistry();
+    const participantId = player.scoreboardIdentity.id.toString();
+
+    // Only update if name changed or new entry
+    if (registry[participantId] !== player.name) {
+      registry[participantId] = player.name;
+      savePlayerNameRegistry(registry);
+      // console.warn(`[Registry] Registered player: ${player.name} (ID: ${participantId})`);
+    }
+  } catch (e) {
+    console.warn(`[Registry] Failed to register player ${player.name}: ${e}`);
+  }
+}
+
+/**
+ * Looks up a player name from the registry.
+ * @param {string} participantId - The scoreboard participant ID
+ * @returns {string|null} The player name or null if not found
+ */
+function lookupPlayerName(participantId) {
+  const registry = loadPlayerNameRegistry();
+  return registry[participantId.toString()] || null;
+}
 
 /** -----------------------------
  *  State helpers
@@ -402,6 +509,9 @@ function handleQuestAbandon(player) {
 
   player.onScreenDisplay?.setActionBar?.("");
 
+  // Play abandon sound
+  player.playSound("quest.abandon", { volume: 0.8, pitch: 1.0 });
+
   return quest;
 }
 
@@ -614,6 +724,28 @@ async function showQuestBoard(player, forcedTab = null, isStandalone = false, pl
       player.playSound("ui.active_open", { volume: 0.8, pitch: 1.0 });
     } else if (tab === BOARD_TABS.LEADERBOARD) {
       player.playSound("ui.legends_open", { volume: 0.8, pitch: 1.0 });
+
+      // Check if this player is ranked #1 on the leaderboard
+      const { entries } = getLeaderboardEntries(player);
+      const isFirstPlace = entries.length > 0 && entries[0].name === player.name;
+
+      if (isFirstPlace) {
+        // Wait 2 seconds (40 ticks) then play special sound for all nearby players
+        system.runTimeout(() => {
+          const nearbyPlayers = player.dimension.getPlayers({
+            location: player.location,
+            maxDistance: 15
+          });
+
+          for (const nearby of nearbyPlayers) {
+            nearby.playSound("ui.legends_first_place", {
+              location: player.location,  // Sound emanates from the #1 player
+              volume: 1.0,
+              pitch: 1.0
+            });
+          }
+        }, 40);  // 40 ticks = 2 seconds
+      }
     }
   }
 
@@ -813,8 +945,22 @@ function getLeaderboardEntries(player) {
   for (const participant of participants) {
     const score = objective.getScore(participant);
     if (typeof score !== "number") continue;
+
+    // Try to get name from registry first (works for offline players)
+    // Fall back to displayName/name for online players or unknown entries
+    let name = lookupPlayerName(participant.id);
+    if (!name) {
+      // Check if displayName looks like the offline placeholder
+      const displayName = participant.displayName || participant.name || "Unknown";
+      if (displayName.includes("offlinePlayerName") || displayName.includes("commands.scoreboard")) {
+        name = "Unknown Player"; // Fallback if not in registry
+      } else {
+        name = displayName;
+      }
+    }
+
     scored.push({
-      name: participant.displayName || participant.name || "Unknown",
+      name,
       score,
       participant,
     });
@@ -851,8 +997,8 @@ function triggerQuestClearCelebration(player, spEarned) {
   // Visual: Totem-style particle burst
   dim.spawnParticle("minecraft:totem_particle", pos);
 
-  // Audio: Triumphant level-up
-  player.playSound("random.levelup", { location: pos, volume: 1.0, pitch: 1.2 });
+  // Audio: Triumphant fanfare for all quests complete
+  player.playSound("quest.complete_all", { location: pos, volume: 1.0, pitch: 1.0 });
 
   // Title card
   player.onScreenDisplay.setTitle("§6§l★ ALL QUESTS COMPLETE ★", {
@@ -1158,7 +1304,7 @@ function handleQuestTurnIn(player) {
 
     const colors = getQuestColors(quest.rarity);
     player.sendMessage(`§a✓ Quest Complete: ${colors.chat}${quest.title}§r (+${spEarned} SP)`);
-    player.playSound("random.levelup");
+    player.playSound("quest.complete_single", { volume: 1.0, pitch: 1.0 });
     player.dimension.spawnParticle("minecraft:villager_happy", player.location);
   }
 
@@ -1167,18 +1313,18 @@ function handleQuestTurnIn(player) {
 }
 
 /** -----------------------------
- *  Quest Master NPC
+ *  Atlas NPC
  *  ----------------------------- */
 
 /**
- * Shows the Quest Master NPC dialog with tutorial/explanation content
+ * Shows the Atlas NPC dialog with tutorial/explanation content
  * @param {import("@minecraft/server").Player} player
  */
 function showQuestMasterDialog(player) {
   const form = new ActionFormData()
-    .title("§5§lThe Quest Master")
+    .title("§5§lAtlas")
     .body(
-      "§7Greetings, adventurer! I am the keeper of the Quest Board.\n\n" +
+      "§7Greetings, adventurer! I am the keeper of the Quest Board, Atlas.\n\n" +
       "§fSelect a topic to learn more:"
     )
     .button("§2How Quests Work", TEXTURES.DEFAULT)
@@ -1269,7 +1415,7 @@ function showTutorialPage(player, topic) {
   const msg = new MessageFormData()
     .title(page.title)
     .body(page.body)
-    .button1("§aBack to Quest Master")
+    .button1("§aBack to Atlas")
     .button2("§7Close");
 
   msg.show(player).then((response) => {
@@ -1384,6 +1530,20 @@ function wireInteractions() {
         PersistenceManager.saveQuestData(ev.sender, data);
         system.run(() => ev.sender.sendMessage("§eDebug: Next board open will trigger 24h refresh.§r"));
       }
+
+      // DEBUG: Register all online player names for leaderboard
+      if (ev.message === "!registernames") {
+        ev.cancel = true;
+        system.run(() => {
+          const players = world.getAllPlayers();
+          let count = 0;
+          for (const p of players) {
+            registerPlayerName(p);
+            count++;
+          }
+          ev.sender.sendMessage(`§aRegistered ${count} player name(s) for leaderboard.§r`);
+        });
+      }
     });
   }
 }
@@ -1397,7 +1557,7 @@ function bootstrap() {
   registerSafeZoneEvents();
   AtmosphereManager.init();
 
-  // Quest Master NPC Interaction
+  // Atlas NPC Interaction
   system.afterEvents.scriptEventReceive.subscribe((ev) => {
     if (ev.id !== "quest:npc_interact") return;
 
@@ -1420,12 +1580,12 @@ function bootstrap() {
     if (now - lastTime < 500) return;
     lastInteractTime.set(player.name + "_npc", now);
 
-    // Auto-name the Quest Master if not already named
-    if (!entity.nameTag || entity.nameTag === "") {
-      entity.nameTag = "§5Quest Master";
+    // Auto-name the NPC (force correct name on every interaction)
+    if (entity.nameTag !== "§5Atlas") {
+      entity.nameTag = "§5Atlas";
     }
 
-    // Play Quest Master greet sound
+    // Play Atlas greet sound
     player.playSound("ui.npc_questmaster_greet", { volume: 0.8, pitch: 1.0 });
 
     // Occasionally play idle sound too (20% chance for flavor)
@@ -1496,6 +1656,71 @@ function bootstrap() {
       }
     }
   }, 20);
+
+  // === TOWN MUSIC ZONE LOOP ===
+  // Checks every MUSIC_CHECK_INTERVAL ticks (~0.5 seconds) for player proximity to town
+  // Plays music when entering, loops it while inside, stops when leaving
+  system.runInterval(() => {
+    const currentTick = system.currentTick;
+
+    for (const player of world.getPlayers()) {
+      const location = player.location;
+      const playerId = player.id;
+
+      // Calculate 2D distance to town center (cylinder check, ignore Y)
+      const dx = location.x - TOWN_CENTER.x;
+      const dz = location.z - TOWN_CENTER.z;
+      const distanceSquared = dx * dx + dz * dz;
+      const isInZone = distanceSquared <= (TOWN_RADIUS * TOWN_RADIUS);
+
+      // Get or create player's music state
+      let state = playerMusicState.get(playerId);
+      if (!state) {
+        state = { inZone: false, nextReplayTick: 0 };
+        playerMusicState.set(playerId, state);
+      }
+
+      if (isInZone) {
+        // Player is in the town zone
+        if (!state.inZone) {
+          // ENTERED the zone - start music!
+          state.inZone = true;
+          state.nextReplayTick = currentTick + TRACK_DURATION_TICKS;
+          try {
+            player.runCommandAsync(`playsound ${TOWN_MUSIC_SOUND_ID} @s ~ ~ ~ 0.75 1`);
+            // console.warn(`[TownMusic] ${player.name} entered zone - starting music`);
+          } catch (e) {
+            console.warn(`[TownMusic] Failed to play for ${player.name}: ${e}`);
+          }
+        } else if (currentTick >= state.nextReplayTick) {
+          // STILL in zone and time to loop - replay track!
+          state.nextReplayTick = currentTick + TRACK_DURATION_TICKS;
+          try {
+            player.runCommandAsync(`playsound ${TOWN_MUSIC_SOUND_ID} @s ~ ~ ~ 0.75 1`);
+            // console.warn(`[TownMusic] ${player.name} looping music`);
+          } catch (e) {
+            console.warn(`[TownMusic] Failed to loop for ${player.name}: ${e}`);
+          }
+        }
+        // If still in zone but not time to replay yet, do nothing (music still playing)
+      } else {
+        // Player is outside the town zone
+        if (state.inZone) {
+          // LEFT the zone - stop music!
+          state.inZone = false;
+          state.nextReplayTick = 0;
+          try {
+            // Stop using stopsound command - target the specific sound
+            player.runCommandAsync(`stopsound @s ${TOWN_MUSIC_SOUND_ID}`);
+            // console.warn(`[TownMusic] ${player.name} left zone - stopping music`);
+          } catch (e) {
+            console.warn(`[TownMusic] Failed to stop for ${player.name}: ${e}`);
+          }
+        }
+        // If already outside and music was stopped, do nothing
+      }
+    }
+  }, MUSIC_CHECK_INTERVAL);
 }
 
 bootstrap();
