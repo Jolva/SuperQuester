@@ -181,6 +181,36 @@
           "load_on_low_memory": true
         }
       ]
+    },
+    "atmosphere.dogs_01": {
+      "category": "ambient",
+      "sounds": [
+        {
+          "name": "sounds/atmosphere/dogs_01",
+          "volume": 0.5,
+          "load_on_low_memory": true
+        }
+      ]
+    },
+    "atmosphere.dogs_02": {
+      "category": "ambient",
+      "sounds": [
+        {
+          "name": "sounds/atmosphere/dogs_02",
+          "volume": 0.5,
+          "load_on_low_memory": true
+        }
+      ]
+    },
+    "atmosphere.dogs_03": {
+      "category": "ambient",
+      "sounds": [
+        {
+          "name": "sounds/atmosphere/dog_03",
+          "volume": 0.5,
+          "load_on_low_memory": true
+        }
+      ]
     }
   }
 }

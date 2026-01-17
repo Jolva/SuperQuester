@@ -33,6 +33,61 @@ const TOWN_MUSIC_SOUND_ID = "questboard.music.town";
 const TRACK_DURATION_TICKS = 880; // ~44 seconds (slight overlap for seamless loop)
 const MUSIC_CHECK_INTERVAL = 10; // Check every 10 ticks (0.5 seconds)
 
+// === RIDICULOUS DOG BARKING ZONE ===
+// Distance-based intensity: The closer you get, the more dogs bark!
+const QUEST_BOARD_LOCATION = { x: 72, y: 75, z: -278 }; // Same as town center
+const DOG_SOUNDS = [
+  "atmosphere.dogs_01",
+  "atmosphere.dogs_02",
+  "atmosphere.dogs_03"
+];
+const DOG_CHECK_INTERVAL = 10; // Check every 10 ticks (0.5 seconds)
+const DOG_REPLAY_TICKS = 60; // Replay barking every 3 seconds while in zone
+
+// Distance tiers: [maxDistance, numberOfTracks, maxVolume]
+// Outer ring (3-6 blocks): 1 track, faint (15-25%)
+// Mid ring (1-3 blocks): 2 tracks, moderate (30-40%)
+// Inner ring (<1 block): 3 tracks, FULL CHAOS (40-50%)
+const DOG_DISTANCE_TIERS = [
+  { maxDist: 6, tracks: 1, minVol: 0.15, maxVol: 0.25 },  // Outer: faint single track
+  { maxDist: 3, tracks: 2, minVol: 0.30, maxVol: 0.40 },  // Mid: two tracks, moderate
+  { maxDist: 1, tracks: 3, minVol: 0.40, maxVol: 0.50 },  // Inner: FULL CHAOS
+];
+const DOG_MAX_RADIUS = 6; // Outer detection radius
+
+// === CAT PROTECTION SQUAD ===
+// Physical cats spawn around players to protect them from the phantom dogs!
+// The closer you get to the quest board, the more cats appear
+const CAT_CHECK_INTERVAL = 20; // Check every 20 ticks (1 second)
+const CAT_MAX_RADIUS = 6; // Same as dog zone
+const CAT_SPAWN_RADIUS = 1.5; // How far from player to spawn cats
+
+// Distance tiers: [maxDistance, numberOfCats]
+// Outer ring (3-6 blocks): 1 cat
+// Mid ring (1-3 blocks): 3 cats
+// Inner ring (<1 block): 6 cats (MAXIMUM PROTECTION)
+const CAT_DISTANCE_TIERS = [
+  { maxDist: 6, cats: 1 },   // Outer: 1 guardian cat
+  { maxDist: 3, cats: 3 },   // Mid: 3 cats
+  { maxDist: 1, cats: 6 },   // Inner: FULL CAT ARMY
+];
+
+// Cat variants for variety (Bedrock cat types)
+const CAT_VARIANTS = [
+  "minecraft:cat_tabby",
+  "minecraft:cat_tuxedo",
+  "minecraft:cat_red",
+  "minecraft:cat_siamese",
+  "minecraft:cat_british_shorthair",
+  "minecraft:cat_calico",
+  "minecraft:cat_persian",
+  "minecraft:cat_ragdoll",
+  "minecraft:cat_white",
+  "minecraft:cat_jellie",
+  "minecraft:cat_black"
+];
+
+
 // Log on world load (Kept from original main.js)
 world.afterEvents.worldInitialize.subscribe(() => {
   console.warn('Quest System BP loaded successfully');
@@ -81,6 +136,7 @@ world.afterEvents.playerSpawn.subscribe((ev) => {
 world.afterEvents.playerLeave.subscribe((ev) => {
   const playerId = ev.playerId;
   playerMusicState.delete(playerId);
+  playerDogBarkState.delete(playerId);
 });
 
 // Initialize Daily Quests (Global Daily Quests - REMOVED)
@@ -207,6 +263,14 @@ const playerTabState = new Map();
 // === TOWN MUSIC ZONE STATE ===
 // Tracks per-player music state: { inZone: boolean, nextReplayTick: number }
 const playerMusicState = new Map();
+
+// === DOG BARKING ZONE STATE ===
+// Tracks per-player dog barking state: { inZone: boolean, nextBarkTick: number }
+const playerDogBarkState = new Map();
+
+// === CAT PROTECTION SQUAD STATE ===
+// Tracks per-player spawned cats: { cats: Entity[], lastTier: number }
+const playerCatSquad = new Map();
 
 // === PLAYER NAME REGISTRY ===
 // Stores player names in world dynamic properties so leaderboard can display
@@ -1862,6 +1926,109 @@ function bootstrap() {
       }
     }
   }, MUSIC_CHECK_INTERVAL);
+
+  // === RIDICULOUS DOG BARKING ZONE LOOP ===
+  // Distance-based intensity: The closer you get, the more dogs you hear!
+  // Outer (3-6 blocks): 1 faint track
+  // Mid (1-3 blocks): 2 tracks at moderate volume
+  // Inner (<1 block): 3 tracks FULL CHAOS + bonus barks
+  system.runInterval(() => {
+    const currentTick = system.currentTick;
+
+    for (const player of world.getPlayers()) {
+      const location = player.location;
+      const playerId = player.id;
+
+      // Calculate 3D distance to quest board
+      const dx = location.x - QUEST_BOARD_LOCATION.x;
+      const dy = location.y - QUEST_BOARD_LOCATION.y;
+      const dz = location.z - QUEST_BOARD_LOCATION.z;
+      const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+      // Get or create player's dog bark state
+      let state = playerDogBarkState.get(playerId);
+      if (!state) {
+        state = { inZone: false, nextBarkTick: 0, lastTier: -1 };
+        playerDogBarkState.set(playerId, state);
+      }
+
+      // Find which tier the player is in (check from innermost to outermost)
+      let activeTier = null;
+      for (let i = DOG_DISTANCE_TIERS.length - 1; i >= 0; i--) {
+        if (distance <= DOG_DISTANCE_TIERS[i].maxDist) {
+          activeTier = DOG_DISTANCE_TIERS[i];
+          break;
+        }
+      }
+
+      if (activeTier) {
+        // Player is in a bark zone!
+        const tierChanged = state.lastTier !== activeTier.maxDist;
+
+        if (!state.inZone || currentTick >= state.nextBarkTick || tierChanged) {
+          // ENTERED, tier changed, or time to bark again
+          state.inZone = true;
+          state.lastTier = activeTier.maxDist;
+          state.nextBarkTick = currentTick + DOG_REPLAY_TICKS;
+
+          // Shuffle the sounds array to randomize which tracks play
+          const shuffledSounds = [...DOG_SOUNDS].sort(() => Math.random() - 0.5);
+
+          // Play the appropriate number of tracks for this tier
+          for (let i = 0; i < activeTier.tracks; i++) {
+            const soundId = shuffledSounds[i];
+            const delay = Math.floor(Math.random() * 5); // Stagger 0-5 ticks
+
+            system.runTimeout(() => {
+              try {
+                // Random volume within tier's range
+                const volume = activeTier.minVol + Math.random() * (activeTier.maxVol - activeTier.minVol);
+                const pitch = 0.8 + Math.random() * 0.4; // 0.8-1.2 pitch
+                player.playSound(soundId, { volume, pitch });
+              } catch (e) {
+                // Silently fail
+              }
+            }, delay);
+          }
+
+          // BONUS: Add extra random barks only in the inner zone (FULL CHAOS mode)
+          if (activeTier.maxDist <= 1) {
+            for (let i = 0; i < 3; i++) {
+              const randomDelay = 10 + Math.floor(Math.random() * 20);
+              const randomSound = DOG_SOUNDS[Math.floor(Math.random() * DOG_SOUNDS.length)];
+              system.runTimeout(() => {
+                try {
+                  const volume = activeTier.minVol + Math.random() * (activeTier.maxVol - activeTier.minVol);
+                  const pitch = 0.6 + Math.random() * 0.8; // Even more pitch variety for chaos
+                  player.playSound(randomSound, { volume, pitch });
+                } catch (e) {
+                  // Silently fail
+                }
+              }, randomDelay);
+            }
+          }
+
+          // console.warn(`[DogZone] ${player.name} in tier ${activeTier.maxDist}m (${activeTier.tracks} tracks)`);
+        }
+      } else {
+        // Player is outside all zones
+        if (state.inZone) {
+          state.inZone = false;
+          state.lastTier = -1;
+          state.nextBarkTick = 0;
+          // Stop all dog sounds
+          DOG_SOUNDS.forEach(soundId => {
+            try {
+              player.runCommandAsync(`stopsound @s ${soundId}`);
+            } catch (e) {
+              // Silently fail
+            }
+          });
+          // console.warn(`[DogZone] ${player.name} escaped the dogs`);
+        }
+      }
+    }
+  }, DOG_CHECK_INTERVAL);
 }
 
 bootstrap();
