@@ -153,22 +153,24 @@ world.afterEvents.worldInitialize.subscribe(() => {
   world.setDefaultSpawnLocation(HUB_SPAWN_LOCATION);
 });
 
-// Load data when player joins AND force spawn at hub
+// Load data when player joins AND handle spawn location
 world.afterEvents.playerSpawn.subscribe((ev) => {
   const { player, initialSpawn } = ev;
 
-  // Force ALL players to spawn at hub (new players AND respawns)
-  // This overrides beds and other spawn points
-  system.runTimeout(() => {
-    try {
-      player.teleport(HUB_SPAWN_LOCATION, {
-        rotation: HUB_SPAWN_ROTATION,
-        checkForBlocks: true
-      });
-    } catch (e) {
-      console.warn(`[Spawn] Failed to teleport ${player.name}: ${e}`);
-    }
-  }, 5); // Small delay to ensure player is fully loaded
+  // Only force teleport to hub on INITIAL spawn (first time joining)
+  // Respawns (after death/sleep) will use bed spawn if set, otherwise world spawn
+  if (initialSpawn) {
+    system.runTimeout(() => {
+      try {
+        player.teleport(HUB_SPAWN_LOCATION, {
+          rotation: HUB_SPAWN_ROTATION,
+          checkForBlocks: true
+        });
+      } catch (e) {
+        console.warn(`[Spawn] Failed to teleport ${player.name}: ${e}`);
+      }
+    }, 5); // Small delay to ensure player is fully loaded
+  }
 
   // Register player name for leaderboard (fixes offline player name display)
   // Also initialize SP (handles backup recovery if scoreboard was wiped)
@@ -2145,7 +2147,7 @@ function bootstrap() {
               const monkeyDelay = 5 + Math.floor(Math.random() * 15);
               system.runTimeout(() => {
                 try {
-                  const volume = 0.3 + Math.random() * 0.2; // 30-50% volume
+                  const volume = 0.15 + Math.random() * 0.1; // 15-25% volume (halved)
                   const pitch = 0.9 + Math.random() * 0.3; // 0.9-1.2 pitch
                   player.playSound(monkeySound, { volume, pitch });
                 } catch (e) {
