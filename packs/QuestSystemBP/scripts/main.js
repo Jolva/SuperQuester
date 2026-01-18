@@ -52,6 +52,7 @@
 
 import { world, system, ItemStack, DisplaySlotId } from "@minecraft/server";
 import { ActionFormData, MessageFormData } from "@minecraft/server-ui";
+import { getMobType } from "./quests/mobTypes.js";
 import { registerSafeZoneEvents, handleSafeZoneCommand } from "./safeZone.js";
 import { PersistenceManager } from "./systems/PersistenceManager.js";
 import { QuestGenerator } from "./systems/QuestGenerator.js";
@@ -176,18 +177,23 @@ world.afterEvents.playerSpawn.subscribe((ev) => {
     initializePlayerSP(player);
   }, 10); // Delay to ensure scoreboard identity is ready
 
-  // Load quest data
-  const quests = PersistenceManager.loadQuests(player);
+  // Load quest data using the NEW format
+  system.runTimeout(() => {
+    const data = ensureQuestData(player);
 
-  if (quests && quests.length > 0) {
-    activeQuestsByPlayer.set(getPlayerKey(player), quests);
-
-    // Resume HUD if applicable
-    const activeQuest = quests.find(q => (q.type === "kill" || q.type === "mine") && q.status !== "complete");
-    if (activeQuest) {
-      updateQuestHud(player, activeQuest);
+    // Resume HUD if player has an active kill/mine quest in progress
+    if (data && data.active) {
+      const quest = data.active;
+      if ((quest.type === "kill" || quest.type === "mine") && data.progress < quest.requiredCount) {
+        updateQuestHud(player, {
+          ...quest,
+          progress: data.progress,
+          goal: quest.requiredCount,
+          status: "active"
+        });
+      }
     }
-  }
+  }, 15); // Slightly longer delay to ensure everything is ready
 });
 
 // Clean up music state and despawn cats when player leaves
@@ -324,6 +330,13 @@ function getQuestColors(rarity) {
 
 /** Tracks which Quest Board tab each player is viewing. */
 const playerTabState = new Map();
+
+/** 
+ * Tracks which player last hit each entity (for kill quest attribution).
+ * Map<entityId, { id: playerId, time: timestamp }>
+ * Used by handleEntityDeath to credit the correct player for kills.
+ */
+const lastHitPlayerByEntityId = new Map();
 
 // === TOWN MUSIC ZONE STATE ===
 // Tracks per-player music state: { inZone: boolean, nextReplayTick: number }
@@ -1902,13 +1915,18 @@ function bootstrap() {
           }
           // We don't save progress to DB for gather quests typically until turn in?
           // Actually spec says "progress" field exists.
+          const previousProgress = data.progress;
           if (data.progress !== count) {
             data.progress = count;
             changed = true; // Save it so UI shows it if we reopen
           }
 
-          // For gather, we do NOT auto-complete.
-          updateQuestHud(player, { ...quest, progress: count, goal: quest.requiredCount, status: "active" });
+          // Check if we just hit the goal (notify player once)
+          if (count >= quest.requiredCount && previousProgress < quest.requiredCount) {
+            markQuestComplete(player, quest);
+          } else {
+            updateQuestHud(player, { ...quest, progress: count, goal: quest.requiredCount, status: "active" });
+          }
         }
       } else {
         // Kill / Mine

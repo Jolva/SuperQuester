@@ -3,11 +3,11 @@
   "header": {
     "name": "Quest System BP",
     "description": "Behavior pack for Super Quester",
-    "uuid": "62ea0339-d29d-45fd-9e77-f2f561487947",
+    "uuid": "b53de2a7-10bd-4fa5-9611-027436f990ad",
     "version": [
       1,
       0,
-      201
+      207
     ],
     "min_engine_version": [
       1,
@@ -19,11 +19,11 @@
     {
       "type": "script",
       "language": "javascript",
-      "uuid": "fc8fc9f7-2781-4ee0-a6e9-28032ae40473",
+      "uuid": "9fe89ace-2895-4f2e-932b-009527fbd548",
       "version": [
         1,
         0,
-        201
+        207
       ],
       "entry": "scripts/main.js"
     }
