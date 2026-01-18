@@ -1,7 +1,7 @@
 import { world, system } from "@minecraft/server";
 
 const WARN_MESSAGE = "§cProtected Hub: No Building Allowed.";
-const DEFAULT_RADIUS = 40;
+const DEFAULT_RADIUS = 20;
 
 // PERMANENT Quest Board Location - This is the fixed center of the safe zone
 const QUEST_BOARD_LOCATION = { x: 72, y: 75, z: -278 };
@@ -87,7 +87,7 @@ function canBypass(player) {
 }
 
 export function registerSafeZoneEvents() {
-  console.warn("[SafeZone] Registering protection events (40 block radius around quest board)");
+  console.warn("[SafeZone] Registering protection events (20 block radius around quest board)");
 
   // 1. Block Break Prevention
   world.beforeEvents.playerBreakBlock.subscribe((ev) => {

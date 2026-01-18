@@ -24,7 +24,7 @@ const HUB_SPAWN_ROTATION = { x: 0, y: 90 }; // Facing West toward the quest boar
 // Town center coordinates (same as Quest Board / Safe Zone center)
 // Change these if your town center moves!
 const TOWN_CENTER = { x: 72, y: 75, z: -278 };
-const TOWN_RADIUS = 40; // blocks
+const TOWN_RADIUS = 20; // blocks (matches safe zone)
 
 // Music track configuration
 // Change TRACK_DURATION_TICKS if you change the audio file length!
@@ -41,35 +41,51 @@ const DOG_SOUNDS = [
   "atmosphere.dogs_02",
   "atmosphere.dogs_03"
 ];
+// BONUS: Monkeys join the chorus in the core zone!
+const MONKEY_SOUNDS = ["atmosphere.monkeys_01"];
 const DOG_CHECK_INTERVAL = 10; // Check every 10 ticks (0.5 seconds)
 const DOG_REPLAY_TICKS = 60; // Replay barking every 3 seconds while in zone
 
-// Distance tiers: [maxDistance, numberOfTracks, maxVolume]
-// Outer ring (3-6 blocks): 1 track, faint (15-25%)
-// Mid ring (1-3 blocks): 2 tracks, moderate (30-40%)
-// Inner ring (<1 block): 3 tracks, FULL CHAOS (40-50%)
+// Distance tiers: [maxDistance, numberOfTracks, minVol, maxVol]
+// Expanded to cover full 20-block safe zone!
+// Far ring (15-20 blocks): 1 track, very faint
+// Outer ring (10-15 blocks): 1 track, faint
+// Mid-outer ring (6-10 blocks): 2 tracks, gentle
+// Mid ring (4-6 blocks): 2 tracks, moderate  
+// Inner ring (2-4 blocks): 3 tracks, loud
+// Core zone (<2 blocks): 3 tracks, FULL CHAOS + bonus barks
 const DOG_DISTANCE_TIERS = [
-  { maxDist: 6, tracks: 1, minVol: 0.15, maxVol: 0.25 },  // Outer: faint single track
-  { maxDist: 3, tracks: 2, minVol: 0.30, maxVol: 0.40 },  // Mid: two tracks, moderate
-  { maxDist: 1, tracks: 3, minVol: 0.40, maxVol: 0.50 },  // Inner: FULL CHAOS
+  { maxDist: 20, tracks: 1, minVol: 0.05, maxVol: 0.10 },  // Far: barely audible
+  { maxDist: 15, tracks: 1, minVol: 0.10, maxVol: 0.15 },  // Outer: faint
+  { maxDist: 10, tracks: 2, minVol: 0.15, maxVol: 0.25 },  // Mid-outer: gentle
+  { maxDist: 6, tracks: 2, minVol: 0.25, maxVol: 0.35 },   // Mid: moderate
+  { maxDist: 4, tracks: 3, minVol: 0.35, maxVol: 0.45 },   // Inner: loud
+  { maxDist: 2, tracks: 3, minVol: 0.36, maxVol: 0.44 },   // Core: FULL CHAOS (lowered 20%)
 ];
-const DOG_MAX_RADIUS = 6; // Outer detection radius
+const DOG_MAX_RADIUS = 20; // Full safe zone coverage!
 
 // === CAT PROTECTION SQUAD ===
 // Physical cats spawn around players to protect them from the phantom dogs!
 // The closer you get to the quest board, the more cats appear
 const CAT_CHECK_INTERVAL = 20; // Check every 20 ticks (1 second)
-const CAT_MAX_RADIUS = 6; // Same as dog zone
+const CAT_MAX_RADIUS = 20; // Full safe zone coverage!
 const CAT_SPAWN_RADIUS = 1.5; // How far from player to spawn cats
 
 // Distance tiers: [maxDistance, numberOfCats]
-// Outer ring (4-6 blocks): 3 cats
-// Mid ring (2-4 blocks): 9 cats  
-// Inner ring (<2 blocks): 18 cats (MAXIMUM PROTECTION)
+// Expanded to cover full 20-block safe zone!
+// Far ring (15-20 blocks): 4 cats - scout squad
+// Outer ring (10-15 blocks): 8 cats
+// Mid-outer ring (6-10 blocks): 16 cats
+// Mid ring (4-6 blocks): 24 cats  
+// Inner ring (2-4 blocks): 32 cats
+// Core zone (<2 blocks): 40 cats (MAXIMUM PROTECTION)
 const CAT_DISTANCE_TIERS = [
-  { maxDist: 6, cats: 3 },    // Outer: 3 guardian cats
-  { maxDist: 4, cats: 9 },    // Mid: 9 cats
-  { maxDist: 2, cats: 18 },   // Inner: FULL CAT ARMY (expanded to 2 blocks!)
+  { maxDist: 20, cats: 4 },   // Far: scout cats
+  { maxDist: 15, cats: 8 },   // Outer: patrol cats
+  { maxDist: 10, cats: 16 },  // Mid-outer: guard cats
+  { maxDist: 6, cats: 24 },   // Mid: defensive cats
+  { maxDist: 4, cats: 32 },   // Inner: protective cats
+  { maxDist: 2, cats: 40 },   // Core: FULL CAT ARMY
 ];
 
 // Cat variants for variety (Bedrock cat types)
@@ -2002,8 +2018,9 @@ function bootstrap() {
             }, delay);
           }
 
-          // BONUS: Add extra random barks only in the inner zone (FULL CHAOS mode)
-          if (activeTier.maxDist <= 1) {
+          // BONUS: Add extra random barks + MONKEYS in the core zone (FULL CHAOS mode)
+          if (activeTier.maxDist <= 2) {
+            // Extra dog barks
             for (let i = 0; i < 3; i++) {
               const randomDelay = 10 + Math.floor(Math.random() * 20);
               const randomSound = DOG_SOUNDS[Math.floor(Math.random() * DOG_SOUNDS.length)];
@@ -2017,6 +2034,20 @@ function bootstrap() {
                 }
               }, randomDelay);
             }
+
+            // 🐵 MONKEYS JOIN THE CHAOS!
+            MONKEY_SOUNDS.forEach(monkeySound => {
+              const monkeyDelay = 5 + Math.floor(Math.random() * 15);
+              system.runTimeout(() => {
+                try {
+                  const volume = 0.3 + Math.random() * 0.2; // 30-50% volume
+                  const pitch = 0.9 + Math.random() * 0.3; // 0.9-1.2 pitch
+                  player.playSound(monkeySound, { volume, pitch });
+                } catch (e) {
+                  // Silently fail
+                }
+              }, monkeyDelay);
+            });
           }
 
           // console.warn(`[DogZone] ${player.name} in tier ${activeTier.maxDist}m (${activeTier.tracks} tracks)`);
@@ -2035,7 +2066,15 @@ function bootstrap() {
               // Silently fail
             }
           });
-          // console.warn(`[DogZone] ${player.name} escaped the dogs`);
+          // Stop monkey sounds too
+          MONKEY_SOUNDS.forEach(soundId => {
+            try {
+              player.runCommandAsync(`stopsound @s ${soundId}`);
+            } catch (e) {
+              // Silently fail
+            }
+          });
+          // console.warn(`[DogZone] ${player.name} escaped the chaos`);
         }
       }
     }

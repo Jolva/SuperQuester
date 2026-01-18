@@ -211,6 +211,16 @@
           "load_on_low_memory": true
         }
       ]
+    },
+    "atmosphere.monkeys_01": {
+      "category": "ambient",
+      "sounds": [
+        {
+          "name": "sounds/atmosphere/monkeys_01",
+          "volume": 0.5,
+          "load_on_low_memory": true
+        }
+      ]
     }
   }
 }
