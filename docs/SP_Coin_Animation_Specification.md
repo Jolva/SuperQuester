@@ -265,12 +265,12 @@ Replace the current single coin image with a stack of 6 conditional images:
 RP/
 └── textures/
     └── quest_ui/
-        ├── sp_coin_0.png  (64x64) - Static/default coin
-        ├── sp_coin_1.png  (64x64) - Front view
-        ├── sp_coin_2.png  (64x64) - Quarter turn
-        ├── sp_coin_3.png  (64x64) - Edge-on/vertical
-        ├── sp_coin_4.png  (64x64) - Three-quarter turn
-        └── sp_coin_5.png  (64x64) - Back view
+        ├── sp_coin_0.png  (32x32) - Static/default coin
+        ├── sp_coin_1.png  (32x32) - Front view
+        ├── sp_coin_2.png  (32x32) - Quarter turn
+        ├── sp_coin_3.png  (32x32) - Edge-on/vertical
+        ├── sp_coin_4.png  (32x32) - Three-quarter turn
+        └── sp_coin_5.png  (32x32) - Back view
 ```
 
 ## Implementation Phases
@@ -344,7 +344,7 @@ RP/
 5. Works consistently across all SP modification points
 6. Delivers the intended "wow factor" visual feedback
 
-## Notes for AntiGravity
+## Developer Notes
 - The title bridge string extraction pattern is proven to work
 - Frame detection uses the same technique as SP value extraction
 - Consider adding a small delay (5-10 ticks) before returning to static if rapid animations feel jarring
