@@ -1,6 +1,15 @@
 {
   "namespace": "hud",
-  "sp_display_label": {
+  "sp_coin_icon": {
+    "type": "image",
+    "texture": "textures/quest_ui/sp_coin",
+    "size": [
+      20,
+      20
+    ],
+    "layer": 100
+  },
+  "sp_value_label": {
     "type": "label",
     "text": "#text",
     "color": [
@@ -11,12 +20,6 @@
     "font_size": "large",
     "font_type": "default",
     "shadow": true,
-    "anchor_from": "bottom_right",
-    "anchor_to": "bottom_right",
-    "offset": [
-      -10,
-      -55
-    ],
     "layer": 100,
     "bindings": [
       {
@@ -30,6 +33,38 @@
       }
     ]
   },
+  "sp_hud_panel": {
+    "type": "stack_panel",
+    "orientation": "horizontal",
+    "size": [
+      "100%c",
+      "100%c"
+    ],
+    "anchor_from": "bottom_right",
+    "anchor_to": "bottom_right",
+    "offset": [
+      -10,
+      -55
+    ],
+    "layer": 100,
+    "controls": [
+      {
+        "coin@hud.sp_coin_icon": {}
+      },
+      {
+        "spacer": {
+          "type": "panel",
+          "size": [
+            4,
+            0
+          ]
+        }
+      },
+      {
+        "value@hud.sp_value_label": {}
+      }
+    ]
+  },
   "root_panel": {
     "modifications": [
       {
@@ -37,7 +72,7 @@
         "operation": "insert_front",
         "value": [
           {
-            "sp_display_label@hud.sp_display_label": {}
+            "sp_hud_panel@hud.sp_hud_panel": {}
           }
         ]
       }
