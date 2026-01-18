@@ -98,12 +98,12 @@ const DOG_REPLAY_TICKS = 60;    // Replay barking every 3 seconds while in zone
 // Inner ring (2-4 blocks): 3 tracks, loud
 // Core zone (<2 blocks): 3 tracks, FULL CHAOS + bonus barks
 const DOG_DISTANCE_TIERS = [
-  { maxDist: 20, tracks: 1, minVol: 0.05, maxVol: 0.10 },  // Far: barely audible
-  { maxDist: 15, tracks: 1, minVol: 0.10, maxVol: 0.15 },  // Outer: faint
-  { maxDist: 10, tracks: 2, minVol: 0.15, maxVol: 0.25 },  // Mid-outer: gentle
-  { maxDist: 6, tracks: 2, minVol: 0.25, maxVol: 0.35 },   // Mid: moderate
-  { maxDist: 4, tracks: 3, minVol: 0.35, maxVol: 0.45 },   // Inner: loud
-  { maxDist: 2, tracks: 3, minVol: 0.36, maxVol: 0.44 },   // Core: FULL CHAOS (lowered 20%)
+  { maxDist: 20, tracks: 1, minVol: 0.025, maxVol: 0.05 },  // Far: barely audible
+  { maxDist: 15, tracks: 1, minVol: 0.05, maxVol: 0.075 },  // Outer: faint
+  { maxDist: 10, tracks: 2, minVol: 0.075, maxVol: 0.125 }, // Mid-outer: gentle
+  { maxDist: 6, tracks: 2, minVol: 0.125, maxVol: 0.175 },  // Mid: moderate
+  { maxDist: 4, tracks: 3, minVol: 0.175, maxVol: 0.225 },  // Inner: loud
+  { maxDist: 2, tracks: 3, minVol: 0.18, maxVol: 0.22 },    // Core: chaos (50% reduction)
 ];
 const DOG_MAX_RADIUS = 20; // Full safe zone coverage!
 
@@ -526,8 +526,26 @@ function initializePlayerSP(player) {
 }
 
 /**
- * Sends the player's current SP value via title for HUD display.
- * JSON UI will bind to this title text to show a custom SP counter.
+ * SP HUD DISPLAY SYSTEM
+ * ======================
+ * Sends the player's SP value via titleraw command for JSON UI to display.
+ * 
+ * HOW IT WORKS:
+ * 1. Script API sends "SPVAL:XX" via titleraw (invisible, 1 tick duration)
+ * 2. JSON UI (hud_screen.json) binds to #hud_title_text_string
+ * 3. String extraction: ('§z' + (#hud_title_text_string - 'SPVAL:')) strips prefix
+ * 4. Result: Custom HUD shows just the number with a coin icon
+ * 
+ * FILES INVOLVED:
+ * - This function in main.js (Script API side)
+ * - packs/QuestSystemRP/ui/hud_screen.json (JSON UI side)
+ * - packs/QuestSystemRP/textures/quest_ui/sp_coin.png (coin icon)
+ * 
+ * CALLED FROM:
+ * - modifySP() — after every SP change
+ * - playerSpawn handler — 1.5s after player joins
+ * 
+ * KNOWN QUIRK: Brief title flash on SP changes (acceptable trade-off)
  * 
  * @param {import("@minecraft/server").Player} player
  */
@@ -535,10 +553,11 @@ function updateSPDisplay(player) {
   const sp = getSP(player);
 
   try {
-    // Phase 3: Invisible timing (0 fade in, 1 tick stay, 0 fade out)
+    // Invisible timing: 0 fade in, 1 tick stay, 0 fade out
+    // JSON UI still captures the value even with minimal duration
     player.runCommandAsync(`titleraw @s times 0 1 0`);
 
-    // Send title with SP value - JSON UI will strip the prefix
+    // Send title with SP value - JSON UI strips the SPVAL: prefix
     player.runCommandAsync(`titleraw @s title {"rawtext":[{"text":"SPVAL:${sp}"}]}`);
 
   } catch (e) {

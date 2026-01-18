@@ -36,3 +36,29 @@ SuperQuester is a Minecraft Bedrock Add-On focused on persistent, procedurally g
 2.  **Available Tab:** Displays generated daily quests.
 3.  **Selection:** Opens `showQuestDetails` (The Contract).
     * *Action:* Accepting triggers `PersistenceManager.saveQuests`.
+
+---
+
+## SP HUD System
+
+Custom HUD element displaying player's Super Points with a coin icon in the bottom-right corner.
+
+**How It Works:**
+1. Script API sends `SPVAL:XX` via `titleraw` command (invisible, 1 tick duration)
+2. JSON UI binds to `#hud_title_text_string` global binding
+3. String extraction: `('§z' + (#hud_title_text_string - 'SPVAL:'))` strips prefix
+4. Stack panel displays coin icon + number
+
+**Key Files:**
+- `scripts/main.js` → `updateSPDisplay()` function (sends title)
+- `ui/hud_screen.json` → JSON UI binding and layout
+- `textures/quest_ui/sp_coin.png` → 32x32 coin icon (displayed at 20x20)
+
+**Called From:**
+- `modifySP()` — after every SP change
+- Player spawn handler — 1.5s after join
+
+**Important Notes:**
+- Sidebar was removed; SP only shows via custom HUD now
+- Brief title flash on updates is expected (acceptable trade-off)
+- Archived handoff docs in `docs/archive/SP_HUD_*.md`

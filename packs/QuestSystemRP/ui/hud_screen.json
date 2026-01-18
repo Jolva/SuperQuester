@@ -40,11 +40,11 @@
       "100%c",
       "100%c"
     ],
-    "anchor_from": "bottom_right",
-    "anchor_to": "bottom_right",
+    "anchor_from": "top_right",
+    "anchor_to": "top_right",
     "offset": [
       -10,
-      -55
+      25
     ],
     "layer": 100,
     "controls": [

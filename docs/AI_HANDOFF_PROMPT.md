@@ -35,6 +35,24 @@ We've implemented a custom audio system. **CRITICAL KNOWLEDGE:**
 
 ---
 
+## 🎯 SP HUD System
+
+Custom HUD displaying Super Points (coin icon + number) in bottom-right corner.
+
+**Key Files:**
+- `scripts/main.js` → `updateSPDisplay()` sends value via `titleraw`
+- `ui/hud_screen.json` → JSON UI binding and layout
+- `textures/quest_ui/sp_coin.png` → Coin icon
+
+**How It Works:**
+1. Script sends `SPVAL:XX` via invisible title
+2. JSON UI binds to `#hud_title_text_string`
+3. String extraction strips prefix: `('§z' + (#hud_title_text_string - 'SPVAL:'))`
+
+**Archived Implementation Docs:** `docs/archive/SP_HUD_*.md`
+
+---
+
 ## 🛠️ Development Workflow
 
 ```bash
