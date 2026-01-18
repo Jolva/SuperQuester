@@ -63,13 +63,13 @@ const CAT_MAX_RADIUS = 6; // Same as dog zone
 const CAT_SPAWN_RADIUS = 1.5; // How far from player to spawn cats
 
 // Distance tiers: [maxDistance, numberOfCats]
-// Outer ring (3-6 blocks): 1 cat
-// Mid ring (1-3 blocks): 3 cats
-// Inner ring (<1 block): 6 cats (MAXIMUM PROTECTION)
+// Outer ring (4-6 blocks): 3 cats
+// Mid ring (2-4 blocks): 9 cats  
+// Inner ring (<2 blocks): 18 cats (MAXIMUM PROTECTION)
 const CAT_DISTANCE_TIERS = [
-  { maxDist: 6, cats: 1 },   // Outer: 1 guardian cat
-  { maxDist: 3, cats: 3 },   // Mid: 3 cats
-  { maxDist: 1, cats: 6 },   // Inner: FULL CAT ARMY
+  { maxDist: 6, cats: 3 },    // Outer: 3 guardian cats
+  { maxDist: 4, cats: 9 },    // Mid: 9 cats
+  { maxDist: 2, cats: 18 },   // Inner: FULL CAT ARMY (expanded to 2 blocks!)
 ];
 
 // Cat variants for variety (Bedrock cat types)
@@ -132,11 +132,22 @@ world.afterEvents.playerSpawn.subscribe((ev) => {
   }
 });
 
-// Clean up music state when player leaves
+// Clean up music state and despawn cats when player leaves
 world.afterEvents.playerLeave.subscribe((ev) => {
   const playerId = ev.playerId;
   playerMusicState.delete(playerId);
   playerDogBarkState.delete(playerId);
+
+  // Despawn any guardian cats
+  const catSquad = playerCatSquad.get(playerId);
+  if (catSquad && catSquad.cats) {
+    catSquad.cats.forEach(cat => {
+      try {
+        if (cat.isValid()) cat.remove();
+      } catch (e) { /* cat already gone */ }
+    });
+  }
+  playerCatSquad.delete(playerId);
 });
 
 // Initialize Daily Quests (Global Daily Quests - REMOVED)
@@ -2029,6 +2040,128 @@ function bootstrap() {
       }
     }
   }, DOG_CHECK_INTERVAL);
+
+  // === CAT PROTECTION SQUAD LOOP ===
+  // Spawns physical cats around players to protect them from phantom dogs!
+  // The closer to the quest board, the more cats spawn
+  system.runInterval(() => {
+    for (const player of world.getPlayers()) {
+      const location = player.location;
+      const playerId = player.id;
+
+      // Calculate 3D distance to quest board
+      const dx = location.x - QUEST_BOARD_LOCATION.x;
+      const dy = location.y - QUEST_BOARD_LOCATION.y;
+      const dz = location.z - QUEST_BOARD_LOCATION.z;
+      const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+      // Get or create player's cat squad state
+      let squad = playerCatSquad.get(playerId);
+      if (!squad) {
+        squad = { cats: [], lastTier: -1 };
+        playerCatSquad.set(playerId, squad);
+      }
+
+      // Clean up any invalid (dead/removed) cats from the list
+      squad.cats = squad.cats.filter(cat => {
+        try {
+          return cat.isValid();
+        } catch (e) {
+          return false;
+        }
+      });
+
+      // Find which tier the player is in
+      let activeTier = null;
+      for (let i = CAT_DISTANCE_TIERS.length - 1; i >= 0; i--) {
+        if (distance <= CAT_DISTANCE_TIERS[i].maxDist) {
+          activeTier = CAT_DISTANCE_TIERS[i];
+          break;
+        }
+      }
+
+      if (activeTier) {
+        // Player is in a cat zone!
+        const targetCatCount = activeTier.cats;
+        const currentCatCount = squad.cats.length;
+        const tierChanged = squad.lastTier !== activeTier.maxDist;
+
+        // Spawn more cats if needed
+        if (currentCatCount < targetCatCount) {
+          const catsToSpawn = targetCatCount - currentCatCount;
+
+          for (let i = 0; i < catsToSpawn; i++) {
+            try {
+              // Random position around player
+              const angle = Math.random() * Math.PI * 2;
+              const spawnX = player.location.x + Math.cos(angle) * CAT_SPAWN_RADIUS;
+              const spawnZ = player.location.z + Math.sin(angle) * CAT_SPAWN_RADIUS;
+              const spawnY = player.location.y + 1; // Spawn 1 block above and let them fall
+
+              // Spawn a random cat variant
+              const catType = CAT_VARIANTS[Math.floor(Math.random() * CAT_VARIANTS.length)];
+
+              // Spawn location 1 block above ground
+              const spawnLoc = { x: spawnX, y: spawnY, z: spawnZ };
+
+              // Use player's dimension
+              const dimension = player.dimension;
+              const cat = dimension.spawnEntity("minecraft:cat", spawnLoc);
+
+              if (cat) {
+                // Tag for identification - cats wander freely (no sitting!)
+                cat.addTag("quest_board_cat");
+                cat.addTag("guardian_cat");
+
+                // NO taming - let them be wild and wander around!
+
+                // Add to squad
+                squad.cats.push(cat);
+
+                // console.warn(`[CatSquad] Spawned guardian cat for ${player.name}`);
+              }
+            } catch (e) {
+              // console.warn(`[CatSquad] Failed to spawn cat: ${e}`);
+            }
+          }
+        }
+
+        // Remove excess cats if tier decreased
+        else if (currentCatCount > targetCatCount) {
+          const catsToRemove = currentCatCount - targetCatCount;
+          for (let i = 0; i < catsToRemove; i++) {
+            const cat = squad.cats.pop();
+            try {
+              if (cat && cat.isValid()) {
+                // Play a poof particle effect before removing
+                cat.dimension.spawnParticle("minecraft:explosion_particle", cat.location);
+                cat.remove();
+              }
+            } catch (e) { /* cat already gone */ }
+          }
+        }
+
+        squad.lastTier = activeTier.maxDist;
+
+      } else {
+        // Player is outside all zones - despawn all cats
+        if (squad.cats.length > 0) {
+          squad.cats.forEach(cat => {
+            try {
+              if (cat.isValid()) {
+                // Poof effect
+                cat.dimension.spawnParticle("minecraft:explosion_particle", cat.location);
+                cat.remove();
+              }
+            } catch (e) { /* cat already gone */ }
+          });
+          squad.cats = [];
+          squad.lastTier = -1;
+          // console.warn(`[CatSquad] ${player.name} left zone - cats despawned`);
+        }
+      }
+    }
+  }, CAT_CHECK_INTERVAL);
 }
 
 bootstrap();
