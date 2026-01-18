@@ -1,3 +1,40 @@
+/**
+ * ============================================================================
+ * PERSISTENCE MANAGER — Player Data Storage
+ * ============================================================================
+ * 
+ * AI AGENT ORIENTATION:
+ * ---------------------
+ * This class handles saving/loading player quest data using Minecraft's
+ * Dynamic Properties API (player.setDynamicProperty / getDynamicProperty).
+ * 
+ * IMPORTANT: Dynamic Properties are stored per-player and persist across
+ * server restarts. They are the ONLY way to save player data in Bedrock.
+ * 
+ * KEY METHODS:
+ * - loadQuestData(player)  → Returns the player's full QuestData object
+ * - saveQuestData(player, data) → Saves the full QuestData object
+ * - wipeData(player) → Clears all quest data (for testing/admin)
+ * 
+ * DATA SCHEMA (QuestData object):
+ * {
+ *   available: Quest[3],      // 3 available quests (null if taken)
+ *   active: Quest|null,       // Currently active quest
+ *   progress: number,         // Progress on active quest (kill/mine count)
+ *   lastRefreshTime: number,  // Unix timestamp of last refresh
+ *   freeRerollAvailable: bool,// Has free reroll token
+ *   paidRerollsThisCycle: number, // Count for exponential pricing
+ *   lifetimeCompleted: number,// Stats tracking
+ *   currentSP: number         // Backup of SP (synced with scoreboard)
+ * }
+ * 
+ * LEGACY SUPPORT:
+ * The old KEY ("superquester:active_data") stored just an array of quests.
+ * Migration happens automatically in main.js's ensureQuestData().
+ * 
+ * ============================================================================
+ */
+
 import { world } from "@minecraft/server";
 
 export class PersistenceManager {

@@ -1,3 +1,45 @@
+/**
+ * ============================================================================
+ * QUEST GENERATOR — Random Quest Creation
+ * ============================================================================
+ * 
+ * AI AGENT ORIENTATION:
+ * ---------------------
+ * This is a STATELESS utility class that generates random quest objects.
+ * It does NOT track state — that's PersistenceManager's job.
+ * 
+ * USAGE:
+ *   const quests = QuestGenerator.generateDailyQuests(3);
+ * 
+ * QUEST OBJECT STRUCTURE (returned by all generate methods):
+ * {
+ *   id: string,           // Unique ID with timestamp (e.g., "kill_zombie_1705093200000_123")
+ *   title: string,        // Display name (e.g., "Kill 10 Zombies")
+ *   description: string,  // Lore text from LORE_TEMPLATES
+ *   type: "kill"|"mine"|"gather",
+ *   category: string,     // For icon lookup (e.g., "undead", "mining")
+ *   rarity: "common"|"rare"|"legendary",
+ *   requiredCount: number,
+ *   targetMobId?: string,      // For kill quests (e.g., "minecraft:zombie")
+ *   targets?: string[],        // For kill quests (mob IDs)
+ *   targetBlockIds?: string[], // For mine quests
+ *   targetItemIds?: string[],  // For gather quests
+ *   reward: {
+ *     scoreboardIncrement: number, // SP to award
+ *     rewardItems: [{ typeId: string, amount: number }]
+ *   }
+ * }
+ * 
+ * RARITY DISTRIBUTION:
+ * - Common: 60% (multiplier: 1x)
+ * - Rare: 30% (multiplier: 2x)
+ * - Legendary: 10% (multiplier: 5x)
+ * 
+ * DATA SOURCE: ../data/QuestData.js (MOB_POOL, ITEM_POOL, LORE_TEMPLATES)
+ * 
+ * ============================================================================
+ */
+
 import { MOB_POOL, ITEM_POOL, LORE_TEMPLATES } from "../data/QuestData.js";
 
 export class QuestGenerator {

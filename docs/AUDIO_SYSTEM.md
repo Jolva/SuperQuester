@@ -167,17 +167,17 @@ ffmpeg -i input.mp3 -ac 1 -ar 44100 -c:a libvorbis -q:a 4 output.ogg
 
 ---
 
-## 📋 Sounds Still Needed (from design doc)
-
-See `quest_board_audio_pass_v_1.md` for the full design wishlist. Still to implement:
+## 📋 Sounds Still Needed
 
 - [ ] `quest_accept_common.ogg` — Common quest acceptance
-- [x] `quest_reroll.ogg` — Successful reroll ✅
 - [ ] `quest_error.ogg` — Not enough SP / error
-- [ ] `quest_progress_tick.ogg` — Kill/gather increment
-- [x] `quest_complete_single.ogg` — Individual quest complete ✅
-- [x] `quest_complete_all.ogg` — All quests complete fanfare ✅
-- [x] `quest_abandon.ogg` — Quest abandoned ✅
+
+### ✅ Completed
+- [x] `quest_reroll.ogg` — Successful reroll
+- [x] `quest_progress_tick.ogg` — Kill/gather increment (5 variants!)
+- [x] `quest_complete_single.ogg` — Individual quest complete
+- [x] `quest_complete_all.ogg` — All quests complete fanfare
+- [x] `quest_abandon.ogg` — Quest abandoned
 
 
 ---

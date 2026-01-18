@@ -31,19 +31,7 @@ We've implemented a custom audio system. **CRITICAL KNOWLEDGE:**
 
 **See:** `docs/AUDIO_SYSTEM.md` for complete technical reference.
 
-**Currently Implemented Sounds:**
-- Menu open sounds (Available, Active, Leaderboard)
-- Quest Master NPC greet and idle
-- Quest accept sounds (Rare, Legendary)
-- Quest board proximity ambient with distance-based volume falloff
-
-**Still Needed (from `docs/quest_board_audio_pass_v_1.md`):**
-- Common quest accept
-- Reroll success
-- Error/denial
-- Progress tick
-- Quest complete (single and all)
-- Quest abandon
+**Audio Status:** Most sounds are implemented! See `docs/AUDIO_SYSTEM.md` for the complete list of implemented sounds and what's still needed.
 
 ---
 

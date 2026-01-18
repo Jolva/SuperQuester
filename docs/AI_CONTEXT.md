@@ -22,10 +22,12 @@ When a player accepts a quest, the **ENTIRE** quest object (Title, Description, 
 *   **Color Codes:** The UI uses strict Minecraft formatting codes (`§l`, `§r`, etc.).
 *   **Button Factory:** The UI is dynamic. `main.js` generates buttons based on available quests.
 
-### 3. Folder Structure quirks
-*   `scripts/systems/` is for pure logic classes (`QuestGenerator`, `PersistenceManager`).
-*   `scripts/` root contains singleton helpers (`scoreboard.js`, `safeZone.js`) and the entry point.
-*   *Note:* Recent refactors moved some files. Always trust `find_by_name` over `PROJECT_MAP.md` if they disagree, but try to keep `PROJECT_MAP.md` updated.
+### 3. Folder Structure (Updated 2026-01-17)
+*   `scripts/main.js` — Central nervous system (~2200 lines). All UI, events, ambient systems.
+*   `scripts/safeZone.js` — Hub protection (20-block radius).
+*   `scripts/systems/` — Pure logic classes (`QuestGenerator`, `PersistenceManager`, `AtmosphereManager`).
+*   `scripts/data/` — Static data pools (`QuestData.js`).
+*   ℹ️ **All script files have AI-agent headers** explaining their purpose.
 
 ## 🛠️ Debugging Tips for Agents
 *   **Content Log:** Errors often appear in the Content Log. If the user says "it's not working", ask for Content Log errors.

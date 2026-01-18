@@ -1,5 +1,40 @@
-import { world, system } from "@minecraft/server";
+/**
+ * ============================================================================
+ * SAFE ZONE — Hub Protection System
+ * ============================================================================
+ * 
+ * AI AGENT ORIENTATION:
+ * ---------------------
+ * This module protects the town hub area from destruction and griefing.
+ * It creates a 20-block cylindrical zone around the quest board where:
+ *   • Players cannot break or place blocks (unless admin)
+ *   • Hostile mobs are auto-removed on spawn
+ *   • Explosion damage is blocked
+ *   • Player damage from hostiles is cancelled
+ * 
+ * EXPORTS:
+ * - isInSafeZone(location) → boolean
+ * - setSafeZoneEnabled(enabled) → void
+ * - isSafeZoneEnabled() → boolean
+ * - registerSafeZoneEvents() → void (call once at startup)
+ * - handleSafeZoneCommand(chatEvent) → boolean (for !safezone command)
+ * 
+ * ADMIN COMMANDS (in-game chat):
+ *   !safezone on      — Enable protection
+ *   !safezone off     — Disable protection
+ *   !safezone status  — Show current settings
+ * 
+ * ADMIN BYPASS:
+ * Players with "admin" tag, operator status, or name "Jolva" can build here.
+ * 
+ * HARDCODED VALUES:
+ * - Center: { x: 72, y: 75, z: -278 } (quest board location)
+ * - Radius: 20 blocks (2D cylinder, ignores Y)
+ * 
+ * ============================================================================
+ */
 
+import { world, system } from "@minecraft/server";
 const WARN_MESSAGE = "§cProtected Hub: No Building Allowed.";
 const DEFAULT_RADIUS = 20;
 

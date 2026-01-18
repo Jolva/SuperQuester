@@ -1,53 +1,95 @@
+/**
+ * ============================================================================
+ * SUPERQUESTER — MAIN ENTRY POINT
+ * ============================================================================
+ * 
+ * AI AGENT ORIENTATION:
+ * ---------------------
+ * This is the central nervous system of the SuperQuester add-on. It handles:
+ *   • Event subscriptions (player spawn, entity death, block break, interactions)
+ *   • UI flow (Quest Board tabs, NPC dialogs, quest details)
+ *   • Core game logic (quest acceptance, turn-in, progress tracking)
+ *   • Ambient systems (town music, atmospheric sounds, cat spawning)
+ * 
+ * KEY ARCHITECTURE PATTERNS:
+ * --------------------------
+ * 1. PERSONAL QUEST SYSTEM: Each player has their own quest pool stored in
+ *    dynamic properties via PersistenceManager. Call `ensureQuestData(player)`
+ *    before any quest operation to get/create their data.
+ * 
+ * 2. SNAPSHOT RULE: When a player accepts a quest, the ENTIRE quest object is
+ *    copied to their saved data. We never reference QuestGenerator after accept.
+ * 
+ * 3. SP DUAL-STORAGE: Super Points are stored in BOTH scoreboard (display) and
+ *    dynamic properties (backup). Use `getSP()` and `modifySP()` helpers.
+ * 
+ * 4. UI FLOW: showQuestBoard() -> tab functions -> handleUiAction() -> effects
+ * 
+ * FILE ORGANIZATION (scroll order):
+ * ----------------------------------
+ *   Lines 1-110:    Imports, constants, configuration
+ *   Lines 110-170:  World/player event handlers
+ *   Lines 170-380:  State maps, player registry
+ *   Lines 380-470:  SP helpers (getSP, modifySP, initializePlayerSP)
+ *   Lines 470-700:  Quest data helpers (ensureQuestData, accept, abandon, etc.)
+ *   Lines 700-1100: UI functions (tabs, forms, action handlers)
+ *   Lines 1100-1350: Leaderboard, celebration, HUD, completion logic
+ *   Lines 1350-1520: Entity death, block break, turn-in handlers
+ *   Lines 1520-1600: Atlas NPC dialog and tutorial pages
+ *   Lines 1600-1710: Block interaction wiring
+ *   Lines 1710-2207: bootstrap() with ambient systems (music, dogs, cats)
+ * 
+ * RELATED FILES:
+ * --------------
+ *   • safeZone.js — Hub protection (20-block radius)
+ *   • systems/PersistenceManager.js — Player data storage
+ *   • systems/QuestGenerator.js — Random quest generation
+ *   • systems/AtmosphereManager.js — Quest board proximity effects (10-block zone)
+ *   • data/QuestData.js — Mob/item pools, lore templates
+ * 
+ * ============================================================================
+ */
+
 import { world, system, ItemStack, DisplaySlotId } from "@minecraft/server";
 import { ActionFormData, MessageFormData } from "@minecraft/server-ui";
-import { getMobType } from "./quests/mobTypes.js";
-import { CONFIG } from "./config.js";
 import { registerSafeZoneEvents, handleSafeZoneCommand } from "./safeZone.js";
 import { PersistenceManager } from "./systems/PersistenceManager.js";
 import { QuestGenerator } from "./systems/QuestGenerator.js";
 import { AtmosphereManager } from "./systems/AtmosphereManager.js";
-// Icon system removed — see Boss Bar implementation for quest tracking HUD
 
-/**
- * QuestBoard Add-on — High-Utility UX Refactor
- * - Simulated Tab System (Available, Active, Leaderboard)
- * - Visual Hierarchy & Texture Integration
- * - Persistent User State (player.name)
- */
+// =============================================================================
+// CONSTANTS — WORLD LOCATIONS
+// =============================================================================
+// These coordinates define the hub area. If you move the town, update ALL of these!
 
-// PERMANENT Hub Spawn Location (staircase leading to quest board)
+/** The quest board / town center location. Used for music zone, dog zone, cats. */
+const QUEST_BOARD_LOCATION = { x: 72, y: 75, z: -278 };
+
+/** Player spawn point (on staircase facing the quest board). */
 const HUB_SPAWN_LOCATION = { x: 84, y: 78, z: -278 };
-// Rotation: yaw = horizontal (0=south, 90=west, 180=north, -90=east), pitch = vertical
-const HUB_SPAWN_ROTATION = { x: 0, y: 90 }; // Facing West toward the quest board
 
-// === TOWN MUSIC ZONE CONFIGURATION ===
-// Town center coordinates (same as Quest Board / Safe Zone center)
-// Change these if your town center moves!
-const TOWN_CENTER = { x: 72, y: 75, z: -278 };
-const TOWN_RADIUS = 20; // blocks (matches safe zone)
+/** Spawn rotation: yaw=90 means facing West toward the quest board. */
+const HUB_SPAWN_ROTATION = { x: 0, y: 90 };
 
-// Music track configuration
-// Change TRACK_DURATION_TICKS if you change the audio file length!
-// Current track: ~45 seconds. Replay at 44 seconds (880 ticks) for seamless loop.
+/** Town/music zone radius in blocks (should match safe zone). */
+const TOWN_RADIUS = 20;
+
+// =============================================================================
+// CONSTANTS — AMBIENT SOUND SYSTEMS
+// =============================================================================
+
+// --- Town Music Zone ---
 const TOWN_MUSIC_SOUND_ID = "questboard.music.town";
 const TRACK_DURATION_TICKS = 880; // ~44 seconds (slight overlap for seamless loop)
-const MUSIC_CHECK_INTERVAL = 10; // Check every 10 ticks (0.5 seconds)
+const MUSIC_CHECK_INTERVAL = 10;  // Check every 0.5 seconds
 
-// === RIDICULOUS DOG BARKING ZONE ===
-// Distance-based intensity: The closer you get, the more dogs bark!
-const QUEST_BOARD_LOCATION = { x: 72, y: 75, z: -278 }; // Same as town center
-const DOG_SOUNDS = [
-  "atmosphere.dogs_01",
-  "atmosphere.dogs_02",
-  "atmosphere.dogs_03"
-];
-// BONUS: Monkeys join the chorus in the core zone!
-const MONKEY_SOUNDS = ["atmosphere.monkeys_01"];
-const DOG_CHECK_INTERVAL = 10; // Check every 10 ticks (0.5 seconds)
-const DOG_REPLAY_TICKS = 60; // Replay barking every 3 seconds while in zone
+// --- Dog Barking Zone (comedic escalation near quest board) ---
+const DOG_SOUNDS = ["atmosphere.dogs_01", "atmosphere.dogs_02", "atmosphere.dogs_03"];
+const MONKEY_SOUNDS = ["atmosphere.monkeys_01"]; // Join the chaos in core zone!
+const DOG_CHECK_INTERVAL = 10;  // Check every 0.5 seconds
+const DOG_REPLAY_TICKS = 60;    // Replay barking every 3 seconds while in zone
 
-// Distance tiers: [maxDistance, numberOfTracks, minVol, maxVol]
-// Expanded to cover full 20-block safe zone!
+// Distance tiers: The closer to the board, the MORE dogs you hear!
 // Far ring (15-20 blocks): 1 track, very faint
 // Outer ring (10-15 blocks): 1 track, faint
 // Mid-outer ring (6-10 blocks): 2 tracks, gentle
@@ -274,17 +316,13 @@ function getQuestColors(rarity) {
   }
 }
 
-/** -----------------------------
- *  State (in-memory)
- *  ----------------------------- */
+// =============================================================================
+// IN-MEMORY STATE
+// =============================================================================
+// These Maps track per-player runtime state. They are NOT persisted across
+// server restarts — use PersistenceManager for permanent data!
 
-/**
- * Map<playerId, QuestState[]>
- */
-const activeQuestsByPlayer = new Map();
-const lastHitPlayerByEntityId = new Map();
-
-// UI State: Track which tab the player is viewing
+/** Tracks which Quest Board tab each player is viewing. */
 const playerTabState = new Map();
 
 // === TOWN MUSIC ZONE STATE ===
@@ -1900,8 +1938,8 @@ function bootstrap() {
       const playerId = player.id;
 
       // Calculate 2D distance to town center (cylinder check, ignore Y)
-      const dx = location.x - TOWN_CENTER.x;
-      const dz = location.z - TOWN_CENTER.z;
+      const dx = location.x - QUEST_BOARD_LOCATION.x;
+      const dz = location.z - QUEST_BOARD_LOCATION.z;
       const distanceSquared = dx * dx + dz * dz;
       const isInZone = distanceSquared <= (TOWN_RADIUS * TOWN_RADIUS);
 
