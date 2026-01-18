@@ -535,11 +535,12 @@ function updateSPDisplay(player) {
   const sp = getSP(player);
 
   try {
-    // Phase 1: Visible timing for verification (0.5s in, 2s stay, 0.5s out)
-    player.runCommandAsync(`titleraw @s times 10 40 10`);
+    // Phase 3: Invisible timing (0 fade in, 1 tick stay, 0 fade out)
+    player.runCommandAsync(`titleraw @s times 0 1 0`);
 
     // Send title with SP value - JSON UI will strip the prefix
     player.runCommandAsync(`titleraw @s title {"rawtext":[{"text":"SPVAL:${sp}"}]}`);
+
   } catch (e) {
     console.warn(`[SuperQuester] Failed to update SP display for ${player.name}: ${e}`);
   }
@@ -1793,11 +1794,12 @@ function bootstrap() {
   if (!objective) {
     objective = world.scoreboard.addObjective(SCOREBOARD_OBJECTIVE_ID, SCOREBOARD_OBJECTIVE_DISPLAY);
   }
-  // Display on sidebar so players can see their SP
+  // Clear sidebar - SP now displays via custom HUD element (Phase 4)
+  // This actively clears persisted world data, not just prevents future setting
   try {
-    world.scoreboard.setObjectiveAtDisplaySlot(DisplaySlotId.Sidebar, { objective });
+    world.scoreboard.clearObjectiveAtDisplaySlot(DisplaySlotId.Sidebar);
   } catch (e) {
-    // May fail if already set, that's fine
+    // May fail if nothing set, that's fine
   }
 
   wireInteractions();

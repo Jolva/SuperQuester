@@ -1,21 +1,21 @@
 {
   "namespace": "hud",
-  "sp_test_label": {
+  "sp_display_label": {
     "type": "label",
     "text": "#text",
     "color": [
       1.0,
-      0.2,
-      0.2
+      0.85,
+      0.0
     ],
     "font_size": "large",
     "font_type": "default",
     "shadow": true,
-    "anchor_from": "top_left",
-    "anchor_to": "top_left",
+    "anchor_from": "bottom_right",
+    "anchor_to": "bottom_right",
     "offset": [
-      10,
-      10
+      -10,
+      -55
     ],
     "layer": 100,
     "bindings": [
@@ -25,7 +25,7 @@
       },
       {
         "binding_type": "view",
-        "source_property_name": "#hud_title_text_string",
+        "source_property_name": "('§z' + (#hud_title_text_string - 'SPVAL:'))",
         "target_property_name": "#text"
       }
     ]
@@ -37,7 +37,7 @@
         "operation": "insert_front",
         "value": [
           {
-            "sp_test_label@hud.sp_test_label": {}
+            "sp_display_label@hud.sp_display_label": {}
           }
         ]
       }
