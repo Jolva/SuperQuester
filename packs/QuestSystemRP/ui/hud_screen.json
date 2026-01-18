@@ -1,0 +1,46 @@
+{
+  "namespace": "hud",
+  "sp_test_label": {
+    "type": "label",
+    "text": "#text",
+    "color": [
+      1.0,
+      0.2,
+      0.2
+    ],
+    "font_size": "large",
+    "font_type": "default",
+    "shadow": true,
+    "anchor_from": "top_left",
+    "anchor_to": "top_left",
+    "offset": [
+      10,
+      10
+    ],
+    "layer": 100,
+    "bindings": [
+      {
+        "binding_name": "#hud_title_text_string",
+        "binding_type": "global"
+      },
+      {
+        "binding_type": "view",
+        "source_property_name": "#hud_title_text_string",
+        "target_property_name": "#text"
+      }
+    ]
+  },
+  "root_panel": {
+    "modifications": [
+      {
+        "array_name": "controls",
+        "operation": "insert_front",
+        "value": [
+          {
+            "sp_test_label@hud.sp_test_label": {}
+          }
+        ]
+      }
+    ]
+  }
+}

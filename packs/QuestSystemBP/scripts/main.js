@@ -175,6 +175,11 @@ world.afterEvents.playerSpawn.subscribe((ev) => {
   system.runTimeout(() => {
     registerPlayerName(player);
     initializePlayerSP(player);
+
+    // Update SP HUD display after initialization
+    system.runTimeout(() => {
+      updateSPDisplay(player);
+    }, 20); // 1 second delay for player to be fully ready
   }, 10); // Delay to ensure scoreboard identity is ready
 
   // Load quest data using the NEW format
@@ -480,6 +485,9 @@ function modifySP(player, delta) {
     PersistenceManager.saveQuestData(player, data);
   }
 
+  // Update HUD display
+  updateSPDisplay(player);
+
   return newBalance;
 }
 
@@ -514,6 +522,26 @@ function initializePlayerSP(player) {
   if (data && scoreboardSP > 0 && backupSP !== scoreboardSP) {
     data.currentSP = scoreboardSP;
     PersistenceManager.saveQuestData(player, data);
+  }
+}
+
+/**
+ * Sends the player's current SP value via title for HUD display.
+ * JSON UI will bind to this title text to show a custom SP counter.
+ * 
+ * @param {import("@minecraft/server").Player} player
+ */
+function updateSPDisplay(player) {
+  const sp = getSP(player);
+
+  try {
+    // Phase 1: Visible timing for verification (0.5s in, 2s stay, 0.5s out)
+    player.runCommandAsync(`titleraw @s times 10 40 10`);
+
+    // Send title with SP value - JSON UI will strip the prefix
+    player.runCommandAsync(`titleraw @s title {"rawtext":[{"text":"SPVAL:${sp}"}]}`);
+  } catch (e) {
+    console.warn(`[SuperQuester] Failed to update SP display for ${player.name}: ${e}`);
   }
 }
 
