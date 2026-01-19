@@ -1,22 +1,111 @@
 {
   "namespace": "hud",
-  "sp_coin_icon": {
+  "sp_coin_frame_0": {
     "type": "image",
-    "texture": "textures/quest_ui/sp_coin",
-    "size": [
-      20,
-      20
-    ],
-    "layer": 100
+    "texture": "textures/quest_ui/sp_coin_0",
+    "size": [20, 20],
+    "layer": 100,
+    "bindings": [
+      {
+        "binding_name": "#hud_title_text_string",
+        "binding_type": "global"
+      },
+      {
+        "binding_type": "view",
+        "source_property_name": "(not ((#hud_title_text_string - 'SPVAL:') = #hud_title_text_string) and ((#hud_title_text_string - ':1') = #hud_title_text_string) and ((#hud_title_text_string - ':2') = #hud_title_text_string) and ((#hud_title_text_string - ':3') = #hud_title_text_string) and ((#hud_title_text_string - ':4') = #hud_title_text_string) and ((#hud_title_text_string - ':5') = #hud_title_text_string))",
+        "target_property_name": "#visible"
+      }
+    ]
+  },
+  "sp_coin_frame_1": {
+    "type": "image",
+    "texture": "textures/quest_ui/sp_coin_1",
+    "size": [20, 20],
+    "layer": 100,
+    "bindings": [
+      {
+        "binding_name": "#hud_title_text_string",
+        "binding_type": "global"
+      },
+      {
+        "binding_type": "view",
+        "source_property_name": "(not ((#hud_title_text_string - ':1') = #hud_title_text_string))",
+        "target_property_name": "#visible"
+      }
+    ]
+  },
+  "sp_coin_frame_2": {
+    "type": "image",
+    "texture": "textures/quest_ui/sp_coin_2",
+    "size": [20, 20],
+    "layer": 100,
+    "bindings": [
+      {
+        "binding_name": "#hud_title_text_string",
+        "binding_type": "global"
+      },
+      {
+        "binding_type": "view",
+        "source_property_name": "(not ((#hud_title_text_string - ':2') = #hud_title_text_string))",
+        "target_property_name": "#visible"
+      }
+    ]
+  },
+  "sp_coin_frame_3": {
+    "type": "image",
+    "texture": "textures/quest_ui/sp_coin_3",
+    "size": [20, 20],
+    "layer": 100,
+    "bindings": [
+      {
+        "binding_name": "#hud_title_text_string",
+        "binding_type": "global"
+      },
+      {
+        "binding_type": "view",
+        "source_property_name": "(not ((#hud_title_text_string - ':3') = #hud_title_text_string))",
+        "target_property_name": "#visible"
+      }
+    ]
+  },
+  "sp_coin_frame_4": {
+    "type": "image",
+    "texture": "textures/quest_ui/sp_coin_4",
+    "size": [20, 20],
+    "layer": 100,
+    "bindings": [
+      {
+        "binding_name": "#hud_title_text_string",
+        "binding_type": "global"
+      },
+      {
+        "binding_type": "view",
+        "source_property_name": "(not ((#hud_title_text_string - ':4') = #hud_title_text_string))",
+        "target_property_name": "#visible"
+      }
+    ]
+  },
+  "sp_coin_frame_5": {
+    "type": "image",
+    "texture": "textures/quest_ui/sp_coin_5",
+    "size": [20, 20],
+    "layer": 100,
+    "bindings": [
+      {
+        "binding_name": "#hud_title_text_string",
+        "binding_type": "global"
+      },
+      {
+        "binding_type": "view",
+        "source_property_name": "(not ((#hud_title_text_string - ':5') = #hud_title_text_string))",
+        "target_property_name": "#visible"
+      }
+    ]
   },
   "sp_value_label": {
     "type": "label",
     "text": "#text",
-    "color": [
-      1.0,
-      0.85,
-      0.0
-    ],
+    "color": [1.0, 0.85, 0.0],
     "font_size": "large",
     "font_type": "default",
     "shadow": true,
@@ -28,41 +117,41 @@
       },
       {
         "binding_type": "view",
-        "source_property_name": "('§z' + (#hud_title_text_string - 'SPVAL:'))",
+        "source_property_name": "('§z' + ((#hud_title_text_string - 'SPVAL:') - ':0' - ':1' - ':2' - ':3' - ':4' - ':5'))",
         "target_property_name": "#text"
       }
+    ]
+  },
+  "sp_coin_stack": {
+    "type": "panel",
+    "size": [20, 20],
+    "layer": 100,
+    "controls": [
+      { "frame_0@hud.sp_coin_frame_0": {} },
+      { "frame_1@hud.sp_coin_frame_1": {} },
+      { "frame_2@hud.sp_coin_frame_2": {} },
+      { "frame_3@hud.sp_coin_frame_3": {} },
+      { "frame_4@hud.sp_coin_frame_4": {} },
+      { "frame_5@hud.sp_coin_frame_5": {} }
     ]
   },
   "sp_hud_panel": {
     "type": "stack_panel",
     "orientation": "horizontal",
-    "size": [
-      "100%c",
-      "100%c"
-    ],
+    "size": ["100%c", "100%c"],
     "anchor_from": "top_right",
     "anchor_to": "top_right",
-    "offset": [
-      -10,
-      25
-    ],
+    "offset": [-10, 25],
     "layer": 100,
     "controls": [
-      {
-        "coin@hud.sp_coin_icon": {}
-      },
+      { "coin@hud.sp_coin_stack": {} },
       {
         "spacer": {
           "type": "panel",
-          "size": [
-            4,
-            0
-          ]
+          "size": [4, 0]
         }
       },
-      {
-        "value@hud.sp_value_label": {}
-      }
+      { "value@hud.sp_value_label": {} }
     ]
   },
   "root_panel": {

@@ -178,9 +178,20 @@ world.afterEvents.playerSpawn.subscribe((ev) => {
     registerPlayerName(player);
     initializePlayerSP(player);
 
-    // Update SP HUD display after initialization
+    // Clear any stuck animation state from previous session
+    playerAnimationState.delete(player.id);
+
+    // Update SP HUD display after initialization - force reset to frame 0
     system.runTimeout(() => {
-      updateSPDisplay(player);
+      const sp = getSP(player);
+      // Clear any cached title first
+      player.runCommandAsync(`titleraw @s clear`);
+      // Small delay then send static display
+      system.runTimeout(() => {
+        player.runCommandAsync(`titleraw @s times 0 1 0`);
+        player.runCommandAsync(`titleraw @s title {"rawtext":[{"text":"SPVAL:${sp}"}]}`);
+        console.warn(`[SP] Initialized display for ${player.name} at ${sp} SP (frame 0)`);
+      }, 5);
     }, 20); // 1 second delay for player to be fully ready
   }, 10); // Delay to ensure scoreboard identity is ready
 
@@ -357,6 +368,10 @@ const playerDogBarkState = new Map();
 // Tracks per-player spawned cats: { cats: Entity[], lastTier: number }
 const playerCatSquad = new Map();
 
+// === SP ANIMATION STATE ===
+// Tracks per-player animation status to prevent overlapping animations
+const playerAnimationState = new Map();
+
 // === PLAYER NAME REGISTRY ===
 // Stores player names in world dynamic properties so leaderboard can display
 // correct names even when players are offline.
@@ -487,8 +502,8 @@ function modifySP(player, delta) {
     PersistenceManager.saveQuestData(player, data);
   }
 
-  // Update HUD display
-  updateSPDisplay(player);
+  // Update HUD display with spinning coin animation
+  updateSPDisplayWithAnimation(player);
 
   return newBalance;
 }
@@ -528,26 +543,34 @@ function initializePlayerSP(player) {
 }
 
 /**
- * SP HUD DISPLAY SYSTEM
- * ======================
- * Sends the player's SP value via titleraw command for JSON UI to display.
+ * SP HUD DISPLAY SYSTEM (STATIC)
+ * ===============================
+ * Sends the player's SP value via titleraw for JSON UI display WITHOUT animation.
+ * Used ONLY on player join/respawn to set initial static state.
+ * 
+ * TITLE BRIDGE PROTOCOL:
+ * - Format: "SPVAL:XX" (no frame suffix)
+ * - Frame 0 is IMPLICIT when no :N suffix exists
+ * - JSON UI detects absence of :1 through :5 and shows sp_coin_0.png
  * 
  * HOW IT WORKS:
  * 1. Script API sends "SPVAL:XX" via titleraw (invisible, 1 tick duration)
- * 2. JSON UI (hud_screen.json) binds to #hud_title_text_string
+ * 2. JSON UI (hud_screen.json) binds to #hud_title_text_string (global)
  * 3. String extraction: ('§z' + (#hud_title_text_string - 'SPVAL:')) strips prefix
- * 4. Result: Custom HUD shows just the number with a coin icon
+ * 4. Frame detection: Checks for absence of :1, :2, :3, :4, :5 = shows frame 0
+ * 5. Result: Custom HUD shows static coin + number
  * 
  * FILES INVOLVED:
  * - This function in main.js (Script API side)
  * - packs/QuestSystemRP/ui/hud_screen.json (JSON UI side)
- * - packs/QuestSystemRP/textures/quest_ui/sp_coin.png (coin icon)
+ * - packs/QuestSystemRP/textures/quest_ui/sp_coin_0.png through sp_coin_5.png
  * 
  * CALLED FROM:
- * - modifySP() — after every SP change
- * - playerSpawn handler — 1.5s after player joins
+ * - playerSpawn handler — on join (with titleraw clear first to flush cache)
  * 
- * KNOWN QUIRK: Brief title flash on SP changes (acceptable trade-off)
+ * IMPORTANT:
+ * - Do NOT call this during gameplay SP changes - use updateSPDisplayWithAnimation()
+ * - Direct scoreboard commands bypass this system entirely
  * 
  * @param {import("@minecraft/server").Player} player
  */
@@ -559,11 +582,115 @@ function updateSPDisplay(player) {
     // JSON UI still captures the value even with minimal duration
     player.runCommandAsync(`titleraw @s times 0 1 0`);
 
-    // Send title with SP value - JSON UI strips the SPVAL: prefix
+    // Send title with SP value (no frame suffix = static coin/frame 0)
     player.runCommandAsync(`titleraw @s title {"rawtext":[{"text":"SPVAL:${sp}"}]}`);
 
   } catch (e) {
     console.warn(`[SuperQuester] Failed to update SP display for ${player.name}: ${e}`);
+  }
+}
+
+/**
+ * SP COIN SPINNING ANIMATION (TRIGGERED ON SP CHANGES)
+ * =====================================================
+ * Plays a 5-frame coin spinning animation when a player's SP value changes.
+ * Uses the title bridge protocol extended with frame numbers.
+ * 
+ * TITLE BRIDGE PROTOCOL EXTENSION:
+ * - Static:    "SPVAL:123"   (no suffix = frame 0 implicit)
+ * - Animating: "SPVAL:123:1" through "SPVAL:123:5"
+ * - Frame 0: Static coin (default state, no :N suffix)
+ * - Frames 1-5: Animation sequence (explicit :N suffixes)
+ * 
+ * ANIMATION FLOW:
+ * 1. Check playerAnimationState map to prevent overlapping animations
+ * 2. Set animation flag for this player (by player.id)
+ * 3. Cycle through frames 1→2→3→4→5 at 4 ticks (200ms) per frame
+ * 4. Wait 2 ticks after frame 5 (ensures last frame processes)
+ * 5. Return to "SPVAL:XX" (no suffix) = frame 0 static state
+ * 6. Clear animation flag in finally block (always executes)
+ * 
+ * JSON UI BINDING MECHANICS (CRITICAL LEARNINGS):
+ * - Uses #hud_title_text_string with "global" binding (NOT collection)
+ * - Collection bindings don't work with Bedrock's title system
+ * - Frame 0 visibility: String contains "SPVAL:" AND no :1/:2/:3/:4/:5 suffixes
+ * - Frames 1-5 visibility: Detects specific suffix with "not" + string subtraction
+ * - Pattern: (not ((#string - ':N') = #string)) returns true when :N exists
+ * - Value extraction: Strips "SPVAL:" and all frame suffixes (:0 through :5)
+ * 
+ * TIMING:
+ * - 4 ticks per frame = 200ms per frame (at 20 TPS)
+ * - Total animation: 1 second (5 frames × 200ms)
+ * - 2 tick pause after frame 5 before returning to static
+ * - Total duration: ~1.1 seconds
+ * 
+ * STATE TRACKING:
+ * - playerAnimationState Map prevents overlapping animations
+ * - Key: player.id, Value: true when animating
+ * - Deleted on spawn (clears stuck states) and in finally block
+ * 
+ * ERROR HANDLING:
+ * - Try-catch around entire animation sequence
+ * - Fallback to static display on any error
+ * - Finally block ensures animation state is ALWAYS cleared
+ * - Console logging for debugging (start/complete/error messages)
+ * 
+ * TRIGGERED BY:
+ * - modifySP() function (ONLY way to properly trigger animation)
+ * - Quest completion rewards
+ * - Reroll purchases (negative SP)
+ * - Any game logic that calls modifySP(player, delta)
+ * 
+ * NOT TRIGGERED BY:
+ * - Direct /scoreboard commands (bypasses modifySP)
+ * - Player join/spawn (uses updateSPDisplay for static)
+ * - Manual scoreboard modifications
+ * 
+ * KNOWN ISSUES & FIXES:
+ * - Title cache on spawn: Fixed with `titleraw @s clear` before setting initial frame
+ * - Frame 0 not showing: Fixed by removing :0 suffix (implicit frame 0)
+ * - Multiple coins visible: Fixed visibility bindings with proper suffix detection
+ * - Animation too fast: Increased from 2 ticks to 4 ticks per frame
+ * 
+ * @param {import("@minecraft/server").Player} player
+ */
+async function updateSPDisplayWithAnimation(player) {
+  const playerId = player.id;
+  
+  // Skip if already animating to prevent visual overlap
+  if (playerAnimationState.get(playerId)) {
+    return;
+  }
+  
+  playerAnimationState.set(playerId, true);
+  const sp = getSP(player);
+  
+  try {
+    console.warn(`[SP Animation] Starting animation for ${player.name} (SP: ${sp})`);
+    
+    // Spin through animation frames (1-5)
+    for (let frame = 1; frame <= 5; frame++) {
+      player.runCommandAsync(`titleraw @s times 0 1 0`);
+      player.runCommandAsync(`titleraw @s title {"rawtext":[{"text":"SPVAL:${sp}:${frame}"}]}`);
+      await system.waitTicks(4); // ~200ms per frame at 20 TPS (1 second total)
+    }
+    
+    // Small delay before returning to static (ensures last frame is processed)
+    await system.waitTicks(2);
+    
+    // Return to static coin (no frame suffix = frame 0)
+    player.runCommandAsync(`titleraw @s times 0 1 0`);
+    player.runCommandAsync(`titleraw @s title {"rawtext":[{"text":"SPVAL:${sp}"}]}`);
+    
+    console.warn(`[SP Animation] Completed animation for ${player.name}`);
+    
+  } catch (error) {
+    console.warn(`[SP Animation] Error for ${player.name}: ${error}`);
+    // Fallback to static display (no frame suffix)
+    player.runCommandAsync(`titleraw @s title {"rawtext":[{"text":"SPVAL:${sp}"}]}`);
+  } finally {
+    // Always clear animation state, even on error
+    playerAnimationState.delete(playerId);
   }
 }
 
