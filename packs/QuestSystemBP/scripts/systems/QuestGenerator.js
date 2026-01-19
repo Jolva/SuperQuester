@@ -41,6 +41,7 @@
  */
 
 import { MOB_POOL, ITEM_POOL, LORE_TEMPLATES } from "../data/QuestData.js";
+import { rollRarity, calculateBaseQuestReward } from "./RewardCalculator.js";
 
 export class QuestGenerator {
   static generateDailyQuests(count = 3) {
@@ -81,37 +82,32 @@ export class QuestGenerator {
       quest = this.generateGatherQuest();
     }
 
-    // Rarity Logic
-    const roll = Math.random();
-    let rarity = "common";
-    let multiplier = 1;
-    let color = "§7";
-
-    if (roll >= 0.9) {
-      rarity = "legendary";
-      multiplier = 5;
-      color = "§6§l";
-    } else if (roll >= 0.6) {
-      rarity = "rare";
-      multiplier = 2;
-      color = "§b";
-    }
-
-    // Apply Rarity
+    // Roll rarity using weighted system from EconomyConfig
+    const rarity = rollRarity();
     quest.rarity = rarity;
-    // quest.title modifies handled in display layers now
-    // quest.title = `${color}${quest.title}§r`;
 
-    // Multiply Rewards
-    if (quest.reward) {
-      if (quest.reward.scoreboardIncrement) {
-        quest.reward.scoreboardIncrement = Math.ceil(quest.reward.scoreboardIncrement * multiplier);
-      }
-      if (quest.reward.rewardItems) {
-        quest.reward.rewardItems.forEach(item => {
-          item.amount = Math.ceil(item.amount * multiplier);
-        });
-      }
+    // Calculate SP reward using new economy system
+    const rewardCalc = calculateBaseQuestReward(
+      rarity,
+      quest.type,
+      quest.requiredCount
+    );
+    quest.reward.scoreboardIncrement = rewardCalc.total;
+
+    // Item rewards still use old multiplier system for now
+    // Map rarity to multiplier for item rewards
+    const rarityToMultiplier = {
+      "common": 1,
+      "rare": 2,
+      "legendary": 5,
+      "mythic": 10  // New mythic tier gets highest item rewards
+    };
+    const itemMultiplier = rarityToMultiplier[rarity] || 1;
+
+    if (quest.reward && quest.reward.rewardItems) {
+      quest.reward.rewardItems.forEach(item => {
+        item.amount = Math.ceil(item.amount * itemMultiplier);
+      });
     }
 
     return quest;

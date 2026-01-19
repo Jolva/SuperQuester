@@ -58,6 +58,31 @@ import { PersistenceManager } from "./systems/PersistenceManager.js";
 import { QuestGenerator } from "./systems/QuestGenerator.js";
 import { AtmosphereManager } from "./systems/AtmosphereManager.js";
 
+// SP Economy imports
+import {
+    initializeSPObjective,
+    getSP as getSPFromManager,
+    addSP,
+    deductSP,
+    purchase,
+    adminAddSP,
+    setModifySPReference
+} from "./systems/SPManager.js";
+
+import {
+    calculateCompletionReward,
+    rollRarity
+} from "./systems/RewardCalculator.js";
+
+import {
+    initializeStreakTracking,
+    incrementStreak,
+    resetAllStreaks,
+    getStreakInfo
+} from "./systems/StreakTracker.js";
+
+import { COSTS, STREAK_CONFIG } from "./data/EconomyConfig.js";
+
 // =============================================================================
 // CONSTANTS — WORLD LOCATIONS
 // =============================================================================
@@ -123,12 +148,12 @@ const CAT_SPAWN_RADIUS = 1.5; // How far from player to spawn cats
 // Inner ring (2-4 blocks): 32 cats
 // Core zone (<2 blocks): 40 cats (MAXIMUM PROTECTION)
 const CAT_DISTANCE_TIERS = [
-  { maxDist: 20, cats: 4 },   // Far: scout cats
-  { maxDist: 15, cats: 8 },   // Outer: patrol cats
-  { maxDist: 10, cats: 16 },  // Mid-outer: guard cats
-  { maxDist: 6, cats: 24 },   // Mid: defensive cats
-  { maxDist: 4, cats: 32 },   // Inner: protective cats
-  { maxDist: 2, cats: 40 },   // Core: FULL CAT ARMY
+  { maxDist: 20, cats: 1 },   // Far: scout cats
+  { maxDist: 15, cats: 2 },   // Outer: patrol cats
+  { maxDist: 10, cats: 3 },  // Mid-outer: guard cats
+  { maxDist: 6, cats: 5 },   // Mid: defensive cats
+  { maxDist: 4, cats: 6 },   // Inner: protective cats
+  { maxDist: 2, cats: 8 },   // Core: FULL CAT ARMY
 ];
 
 // Cat variants for variety (Bedrock cat types)
@@ -151,6 +176,10 @@ const CAT_VARIANTS = [
 world.afterEvents.worldInitialize.subscribe(() => {
   console.warn('Quest System BP loaded successfully');
   world.setDefaultSpawnLocation(HUB_SPAWN_LOCATION);
+
+  // Initialize SP economy systems
+  initializeSPObjective();
+  initializeStreakTracking();
 });
 
 // Load data when player joins AND handle spawn location
@@ -264,6 +293,7 @@ const TEXTURES = {
   // UI Elements
   REFRESH: "textures/quest_ui/icon_refresh.png",
   COMPLETE: "textures/quest_ui/icon_complete.png",
+  MYTHIC: "textures/quest_ui/icon_mythic.png",
   LEGENDARY: "textures/quest_ui/icon_legendary.png",
   RARE: "textures/quest_ui/icon_rare.png",
   CLOCK: "textures/quest_ui/icon_clock.png",
@@ -306,6 +336,7 @@ const BOARD_TABS = {
 function getQuestIcon(quest, showRarityBadge = false) {
   // Rarity badge override (for special visual emphasis)
   if (showRarityBadge) {
+    if (quest.rarity === "mythic") return TEXTURES.MYTHIC;
     if (quest.rarity === "legendary") return TEXTURES.LEGENDARY;
     if (quest.rarity === "rare") return TEXTURES.RARE;
   }
@@ -330,6 +361,8 @@ function getQuestColors(rarity) {
   // Returns { chat: "code", button: "code" }
   // NOTE: button colors should be light for visibility on custom stone button textures
   switch (rarity) {
+    case "mythic":
+      return { chat: "§d§l", button: "§d" }; // Light Purple/Light Purple (mythic tier)
     case "legendary":
       return { chat: "§6§l", button: "§6" }; // Gold/Gold (already visible)
     case "rare":
@@ -507,6 +540,12 @@ function modifySP(player, delta) {
 
   return newBalance;
 }
+
+// Export modifySP for SPManager to wrap
+export { modifySP };
+
+// Set modifySP reference in SPManager so it can wrap this function
+setModifySPReference(modifySP);
 
 /**
  * Initializes a player's SP on join.
@@ -724,6 +763,7 @@ function ensureQuestData(player) {
         active: oldQuests[0] || null,  // Take first old quest as active
         progress: oldQuests[0]?.progress || 0,
         lastRefreshTime: Date.now(),
+        lastCompletionTime: 0,  // Track last quest completion for first-of-day bonus
         freeRerollAvailable: true,
         paidRerollsThisCycle: 0,
         lifetimeCompleted: 0,
@@ -742,6 +782,7 @@ function ensureQuestData(player) {
         active: null,
         progress: 0,
         lastRefreshTime: Date.now(),
+        lastCompletionTime: 0,  // Track last quest completion for first-of-day bonus
         freeRerollAvailable: true,  // Start with 1 free reroll
         paidRerollsThisCycle: 0,
         lifetimeCompleted: 0,
@@ -765,6 +806,12 @@ function ensureQuestData(player) {
     data.lastRefreshTime = Date.now();
     data.paidRerollsThisCycle = 0;  // Reset pricing
     // NOTE: freeRerollAvailable unchanged — don't grant on timer
+
+    // Reset streak tracking on new day
+    if (STREAK_CONFIG.resetOnNewDay) {
+      resetAllStreaks();
+    }
+
     PersistenceManager.saveQuestData(player, data);
 
     player.sendMessage("§e⏰ Your daily quests have refreshed!§r");
@@ -774,22 +821,49 @@ function ensureQuestData(player) {
   return data;
 }
 
+// === DAILY COMPLETION TRACKING ===
+// Uses timestamp comparison aligned with quest refresh system
+
+/**
+ * Checks if player has completed a quest today.
+ * Uses timestamp comparison aligned with quest refresh system.
+ * @param {import("@minecraft/server").Player} player
+ * @returns {boolean} True if player completed a quest in last 24 hours
+ */
+function hasCompletedQuestToday(player) {
+  const data = ensureQuestData(player);
+  if (!data.lastCompletionTime) return false;
+
+  const timeSinceCompletion = Date.now() - data.lastCompletionTime;
+  return timeSinceCompletion < TWENTY_FOUR_HOURS_MS;
+}
+
+/**
+ * Marks that player has completed a quest.
+ * Records timestamp for first-of-day bonus tracking.
+ * @param {import("@minecraft/server").Player} player
+ */
+function markDailyCompletion(player) {
+  const data = ensureQuestData(player);
+  data.lastCompletionTime = Date.now();
+  PersistenceManager.saveQuestData(player, data);
+}
+
 /**
  * Calculates SP cost for the next paid reroll.
+ * Uses exponential pricing from EconomyConfig.
  * @param {number} paidRerollsThisCycle
  * @returns {number} SP cost
  */
 function calculateRerollPrice(paidRerollsThisCycle) {
-  const BASE_PRICE = 50;
-
-  if (paidRerollsThisCycle < 2) {
-    return BASE_PRICE;
+  // First N rerolls cost base price
+  if (paidRerollsThisCycle < COSTS.rerollFreeCount) {
+    return COSTS.rerollBase;
   }
 
-  // 3rd reroll = 50 * 2^1 = 100
-  // 4th reroll = 50 * 2^2 = 200
-  // etc.
-  return BASE_PRICE * Math.pow(2, paidRerollsThisCycle - 1);
+  // Subsequent rerolls use exponential pricing
+  // Example with config (100, 2, 2): 100, 100, 200, 400, 800...
+  return COSTS.rerollBase * Math.pow(COSTS.rerollExponent, paidRerollsThisCycle - COSTS.rerollFreeCount);
 }
 
 /**
@@ -817,16 +891,15 @@ function handleRefresh(player) {
 
   // CASE 2: Paid reroll
   const price = calculateRerollPrice(data.paidRerollsThisCycle);
-  const currentSP = getSP(player);
 
-  if (currentSP < price) {
-    player.sendMessage(`§cNot enough SP! Need ${price}, have ${currentSP}.§r`);
+  // Attempt purchase using SPManager
+  const purchaseResult = purchase(player, price);
+
+  if (!purchaseResult.success) {
+    player.sendMessage(purchaseResult.message);
     player.playSound("note.bass", { pitch: 0.5 });
     return false;
   }
-
-  // Deduct SP using centralized helper (updates both scoreboard and backup)
-  modifySP(player, -price);
 
   data.paidRerollsThisCycle += 1;
   data.available = QuestGenerator.generateDailyQuests(3);
@@ -996,10 +1069,10 @@ async function showAvailableTab(player, actions, isStandalone = false) {
     addTabButtons(form, BOARD_TABS.AVAILABLE, actions);
   }
 
-  // 2. Quest buttons (rare/legendary show rarity badge, common shows category icon)
+  // 2. Quest buttons (mythic/legendary/rare show rarity badge, common shows category icon)
   data.available.forEach((quest, index) => {
     if (quest) {
-      const showRarityBadge = quest.rarity === "legendary" || quest.rarity === "rare";
+      const showRarityBadge = quest.rarity === "mythic" || quest.rarity === "legendary" || quest.rarity === "rare";
       const icon = getQuestIcon(quest, showRarityBadge);
       const colors = getQuestColors(quest.rarity);
       form.button(`${colors.button}${quest.title}§r`, icon);
@@ -1246,7 +1319,7 @@ async function showQuestDetails(player, questIndex, isStandalone = false) {
   const itemsRaw = def.reward?.rewardItems || [];
 
   let rewardsStr = "";
-  if (scoreRaw > 0) rewardsStr += `\n§e+${scoreRaw} Town Reputation§r`;
+  if (scoreRaw > 0) rewardsStr += `\n§e+${scoreRaw} Super Points§r`;
   for (const item of itemsRaw) {
     // Attempt to pretty print item name
     const name = item.typeId.replace("minecraft:", "").replace(/_/g, " ");
@@ -1258,10 +1331,14 @@ async function showQuestDetails(player, questIndex, isStandalone = false) {
   let rarityText = "§7Tier: COMMON§r";
   if (def.rarity === "rare") rarityText = "§bTier: RARE§r";
   if (def.rarity === "legendary") rarityText = "§6§lTier: LEGENDARY§r";
+  if (def.rarity === "mythic") rarityText = "§d§lTier: MYTHIC§r";
 
   let warningText = "";
   if (def.rarity === "legendary") {
     warningText = "\n\n§c⚠ HIGH VALUE TARGET ⚠§r";
+  }
+  if (def.rarity === "mythic") {
+    warningText = "\n\n§d§l⚠ ULTRA RARE MYTHIC ⚠§r";
   }
 
   const colors = getQuestColors(def.rarity);
@@ -1636,30 +1713,50 @@ function handleQuestTurnIn(player) {
 
   // === SUCCESSFUL TURN-IN ===
 
-  // Award rewards
+  // Calculate final reward with all bonuses
   const reward = quest.reward;
-  const spEarned = reward?.scoreboardIncrement ?? 0;
+  const questBaseSP = reward?.scoreboardIncrement ?? 0;
+  const isFirstOfDay = !hasCompletedQuestToday(player);
 
-  if (reward) {
-    // Award SP using centralized helper (updates both scoreboard and backup)
-    if (spEarned > 0) {
-      modifySP(player, spEarned);
-    }
+  const rewardResult = calculateCompletionReward(
+    questBaseSP,
+    quest.rarity,
+    player,
+    isFirstOfDay
+  );
 
-    // Items
-    if (reward.rewardItems) {
-      const inventory = player.getComponent("inventory")?.container;
-      if (inventory) {
-        for (const rItem of reward.rewardItems) {
-          try {
-            const itemStack = new ItemStack(rItem.typeId, rItem.amount);
-            inventory.addItem(itemStack);
-            player.sendMessage(`§aReceived: ${rItem.amount}x ${rItem.typeId.replace("minecraft:", "")}§r`);
-          } catch (e) {
-            // Inventory full — drop at feet
-            player.dimension.spawnItem(new ItemStack(rItem.typeId, rItem.amount), player.location);
-            player.sendMessage(`§eInventory full! Dropped: ${rItem.amount}x ${rItem.typeId.replace("minecraft:", "")}§r`);
-          }
+  // Award SP using new economy system
+  if (rewardResult.finalAmount > 0) {
+    addSP(player, rewardResult.finalAmount);
+  }
+
+  // Increment streak
+  incrementStreak(player);
+
+  // Mark daily completion
+  markDailyCompletion(player);
+
+  // Display reward message (includes jackpot, streaks, daily bonus)
+  player.sendMessage(rewardResult.message);
+
+  // Play jackpot sound if triggered
+  if (rewardResult.isJackpot) {
+    player.playSound("random.levelup", { volume: 1.0, pitch: 1.2 });
+  }
+
+  // Items (unchanged)
+  if (reward && reward.rewardItems) {
+    const inventory = player.getComponent("inventory")?.container;
+    if (inventory) {
+      for (const rItem of reward.rewardItems) {
+        try {
+          const itemStack = new ItemStack(rItem.typeId, rItem.amount);
+          inventory.addItem(itemStack);
+          player.sendMessage(`§aReceived: ${rItem.amount}x ${rItem.typeId.replace("minecraft:", "")}§r`);
+        } catch (e) {
+          // Inventory full — drop at feet
+          player.dimension.spawnItem(new ItemStack(rItem.typeId, rItem.amount), player.location);
+          player.sendMessage(`§eInventory full! Dropped: ${rItem.amount}x ${rItem.typeId.replace("minecraft:", "")}§r`);
         }
       }
     }
@@ -1685,13 +1782,13 @@ function handleQuestTurnIn(player) {
     PersistenceManager.saveQuestData(player, data);
 
     // CELEBRATION!
-    triggerQuestClearCelebration(player, spEarned);
+    triggerQuestClearCelebration(player, rewardResult.finalAmount);
   } else {
     // Normal turn-in
     PersistenceManager.saveQuestData(player, data);
 
     const colors = getQuestColors(quest.rarity);
-    player.sendMessage(`§a✓ Quest Complete: ${colors.chat}${quest.title}§r (+${spEarned} SP)`);
+    player.sendMessage(`§a✓ Quest Complete: ${colors.chat}${quest.title}`);
     player.playSound("quest.complete_single", { volume: 1.0, pitch: 1.0 });
     player.dimension.spawnParticle("minecraft:villager_happy", player.location);
   }
@@ -1718,7 +1815,7 @@ function showQuestMasterDialog(player) {
     .button("§2How Quests Work", TEXTURES.DEFAULT)
     .button("§eAbout Super Points (SP)", TEXTURES.SP_COIN)
     .button("§bRerolls & Refreshes", TEXTURES.REFRESH)
-    .button("§6Legendary Quests", TEXTURES.LEGENDARY)
+    .button("§dQuest Rarities", TEXTURES.MYTHIC)
     .button("§aOpen Quest Board", TEXTURES.CATEGORY_UNDEAD)
     .button("§7Nevermind");
 
@@ -1736,7 +1833,7 @@ function showQuestMasterDialog(player) {
         showTutorialPage(player, "rerolls");
         break;
       case 3:
-        showTutorialPage(player, "legendary");
+        showTutorialPage(player, "rarities");
         break;
       case 4:
         // Open the actual quest board
@@ -1768,7 +1865,7 @@ function showTutorialPage(player, topic) {
       body:
         "§6SP§f is the currency of the Quest Board.\n\n" +
         "§7• §fEarn SP by completing quests\n" +
-        "§7• §fHarder quests (§brare§f, §6legendary§f) give more SP\n" +
+        "§7• §fHigher rarity quests (§brare§f, §6legendary§f, §dmythic§f) give more SP\n" +
         "§7• §fSP is tracked on the §dLeaderboard§f tab\n" +
         "§7• §fSpend SP on §cpaid rerolls§f when your free one is used\n\n" +
         "§8Future: SP will unlock rewards, cosmetics, and more!"
@@ -1781,19 +1878,22 @@ function showTutorialPage(player, topic) {
         "§7You get §eONE free reroll§7 per 24-hour cycle. Use it wisely!\n\n" +
         "§c§lPaid Rerolls§r\n" +
         "§7After your free reroll, you can spend §6SP§7 for more:\n" +
-        "§7• 1st paid: §e50 SP§7 → 2nd: §e50 SP§7 → 3rd: §e100 SP§7...\n\n" +
+        "§7• 1st-2nd paid: §e100 SP§7 each → 3rd: §e200 SP§7 → 4th: §e400 SP§7...\n\n" +
         "§d§l24-Hour Refresh§r\n" +
         "§7Every 24 hours, your quests fully refresh and rerolls reset."
     },
-    legendary: {
-      title: "§6§lLegendary Quests",
+    rarities: {
+      title: "§dQuest Rarities",
       body:
-        "§6Legendary quests§f are rare and highly rewarding!\n\n" +
-        "§7• §fThey appear randomly in your quest pool\n" +
-        "§7• §fThey have §cdifficult goals§f but §amassive SP rewards§f\n" +
-        "§7• §fSome grant §dspecial item rewards§f\n" +
-        "§7• §fThey're marked with a §6golden icon§f\n\n" +
-        "§8If you see one, consider saving your reroll for something else!"
+        "§fQuests come in four rarity tiers:\n\n" +
+        "§7§lCOMMON§r §f(70%) - Basic rewards\n" +
+        "§b§lRARE§r §f(22%) - 2x item rewards, higher SP\n" +
+        "§6§lLEGENDARY§r §f(7%) - 5x items, massive SP, marked with §6golden crown§f\n" +
+        "§d§lMYTHIC§r §f(1%) - 10x items, jackpot SP, marked with §dcrimson gem§f\n\n" +
+        "§7• §fHigher rarities = better rewards & SP multipliers\n" +
+        "§7• §fJackpot bonuses can trigger on any quest!\n" +
+        "§7• §fStreak bonuses stack with rarity for huge payouts\n\n" +
+        "§8If you see a mythic, don't reroll it!"
     }
   };
 
@@ -2436,5 +2536,59 @@ function bootstrap() {
     }
   }, CAT_CHECK_INTERVAL);
 }
+
+// === ADMIN COMMANDS ===
+
+/**
+ * Admin scriptevent handler for giving SP to players.
+ * Usage:
+ *   /scriptevent sq:givesp 500              - Give yourself 500 SP
+ *   /scriptevent sq:givesp 1000 PlayerName  - Give PlayerName 1000 SP
+ */
+system.afterEvents.scriptEventReceive.subscribe((event) => {
+  if (event.id === "sq:givesp") {
+    const player = event.sourceEntity;
+    if (!player || player.typeId !== "minecraft:player") {
+      console.warn("[Admin] givesp must be run by a player");
+      return;
+    }
+
+    const args = event.message.trim().split(/\s+/);
+
+    // Format: /scriptevent sq:givesp <amount> [targetPlayer]
+    if (args.length === 0 || isNaN(parseInt(args[0]))) {
+      player.sendMessage("§cUsage: /scriptevent sq:givesp <amount> [player]");
+      return;
+    }
+
+    const amount = parseInt(args[0]);
+    let target = player;
+
+    // If player name specified, find them
+    if (args.length > 1) {
+      const targetName = args.slice(1).join(" ");
+      const foundPlayers = world.getPlayers({ name: targetName });
+
+      if (foundPlayers.length === 0) {
+        player.sendMessage(`§cPlayer not found: ${targetName}`);
+        return;
+      }
+
+      target = foundPlayers[0];
+    }
+
+    const result = adminAddSP(target, amount, `gift from ${player.name}`);
+
+    if (result.success) {
+      player.sendMessage(`§aGave §e${amount} SP §ato §b${target.name}§a. New balance: §e${result.newBalance}`);
+
+      if (target.id !== player.id) {
+        target.sendMessage(`§6+${amount} SP §7(admin gift)`);
+      }
+    } else {
+      player.sendMessage("§cFailed to award SP.");
+    }
+  }
+});
 
 bootstrap();
