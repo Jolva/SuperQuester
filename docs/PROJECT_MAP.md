@@ -1,5 +1,23 @@
 # Project File Map
 
+> **Last Updated:** 2026-01-18 (Added Claude-specific docs)
+
+## 📚 Documentation Quick Guide
+
+**New to the project? Start here:**
+1. [CLAUDE_QUICKSTART.md](CLAUDE_QUICKSTART.md) - 2-minute onboarding for Claude sessions
+2. [AI_CONTEXT.md](AI_CONTEXT.md) - Mental models and critical architecture rules
+3. [ARCHITECTURE.md](ARCHITECTURE.md) - System design and data flow
+4. [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Common issues and solutions
+
+**For specific work:**
+- [CODING_STANDARDS.md](CODING_STANDARDS.md) - Constraints and forbidden patterns
+- [AUDIO_SYSTEM.md](AUDIO_SYSTEM.md) - How to add/modify sounds
+- [SP_Coin_Animation_Specification.md](SP_Coin_Animation_Specification.md) - HUD system details
+- [AI_HANDOFF_PROMPT.md](AI_HANDOFF_PROMPT.md) - Legacy handoff template
+
+---
+
 > **Last Updated:** 2026-01-17 (Post-Cleanup)
 
 ## Root Directory

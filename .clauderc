@@ -1,0 +1,33 @@
+# Claude Code Configuration for SuperQuester
+
+# This file provides context-specific settings for Claude Code when working on this project.
+# See: https://github.com/anthropics/claude-code
+
+# Project type
+project_type: minecraft_bedrock_addon
+
+# Key directories
+behavior_pack: packs/QuestSystemBP/
+resource_pack: packs/QuestSystemRP/
+docs: docs/
+
+# Main entry point
+main_script: packs/QuestSystemBP/scripts/main.js
+
+# Testing/deployment
+cache_buster: python tools/cache_buster.py
+server_start: ./bedrock_server.exe
+
+# Common file patterns to search
+scripts: "packs/QuestSystemBP/scripts/**/*.js"
+ui_files: "packs/QuestSystemRP/ui/**/*.json"
+sounds: "packs/QuestSystemRP/sounds/**/*"
+
+# Critical constraints (remind Claude)
+constraints:
+  - "Always run cache_buster.py after JSON/texture changes"
+  - "Use modifySP() helper, never direct scoreboard commands"
+  - "Quest data must be saved via PersistenceManager after state changes"
+  - "JSON UI changes require full game restart, not /reload"
+  - "All sounds must be mono OGG at 44100Hz in subfolders"
+  - "Never break the Snapshot Rule (see AI_CONTEXT.md)"
