@@ -58,8 +58,7 @@
 export const ENCOUNTER_TABLE = [
   // ============================================
   // RARE TIER (4 encounters)
-  // Target: 3-6 mobs, straightforward composition
-  // Spawn ring: 60-120 blocks from quest board
+  // Spawn distance: 18-22 blocks from player
   // ============================================
   {
     id: "skeleton_warband",
@@ -67,9 +66,9 @@ export const ENCOUNTER_TABLE = [
     description: "A group of skeletal warriors has assembled nearby.",
     tier: "rare",
     mobs: [
-      { type: "minecraft:skeleton", count: 5, equipment: null, nameTag: null }
+      { type: "minecraft:skeleton", count: 100, equipment: null, nameTag: null }
     ],
-    totalMobCount: 5
+    totalMobCount: 100
   },
   {
     id: "zombie_pack",
@@ -77,9 +76,9 @@ export const ENCOUNTER_TABLE = [
     description: "The dead are walking. Put them down.",
     tier: "rare",
     mobs: [
-      { type: "minecraft:zombie", count: 6, equipment: null, nameTag: null }
+      { type: "minecraft:zombie", count: 100, equipment: null, nameTag: null }
     ],
-    totalMobCount: 6
+    totalMobCount: 100
   },
   {
     id: "spider_nest",
@@ -87,10 +86,10 @@ export const ENCOUNTER_TABLE = [
     description: "Arachnids have infested the area.",
     tier: "rare",
     mobs: [
-      { type: "minecraft:spider", count: 4, equipment: null, nameTag: null },
-      { type: "minecraft:cave_spider", count: 2, equipment: null, nameTag: null }
+      { type: "minecraft:spider", count: 70, equipment: null, nameTag: null },
+      { type: "minecraft:cave_spider", count: 30, equipment: null, nameTag: null }
     ],
-    totalMobCount: 6  // 4 spiders + 2 cave spiders
+    totalMobCount: 100
   },
   {
     id: "creeper_cluster",
@@ -98,15 +97,14 @@ export const ENCOUNTER_TABLE = [
     description: "Something hisses in the shadows...",
     tier: "rare",
     mobs: [
-      { type: "minecraft:creeper", count: 3, equipment: null, nameTag: null }
+      { type: "minecraft:creeper", count: 100, equipment: null, nameTag: null }
     ],
-    totalMobCount: 3  // Fewer mobs, but creepers are dangerous
+    totalMobCount: 100
   },
 
   // ============================================
   // LEGENDARY TIER (4 encounters)
-  // Target: 6-14 mobs, mixed mob types, named elites
-  // Spawn ring: 100-200 blocks from quest board
+  // Spawn distance: 18-22 blocks from player
   // ============================================
   {
     id: "skeleton_legion",
@@ -114,10 +112,10 @@ export const ENCOUNTER_TABLE = [
     description: "An organized force of the undead marches on the realm.",
     tier: "legendary",
     mobs: [
-      { type: "minecraft:skeleton", count: 8, equipment: null, nameTag: null },
-      { type: "minecraft:stray", count: 3, equipment: null, nameTag: "Frost Archer" }  // Named elite
+      { type: "minecraft:skeleton", count: 70, equipment: null, nameTag: null },
+      { type: "minecraft:stray", count: 30, equipment: null, nameTag: "Frost Archer" }
     ],
-    totalMobCount: 11  // 8 skeletons + 3 strays
+    totalMobCount: 100
   },
   {
     id: "zombie_siege",
@@ -125,10 +123,10 @@ export const ENCOUNTER_TABLE = [
     description: "A massive horde approaches. Hold the line.",
     tier: "legendary",
     mobs: [
-      { type: "minecraft:zombie", count: 10, equipment: null, nameTag: null },
-      { type: "minecraft:husk", count: 4, equipment: null, nameTag: null }
+      { type: "minecraft:zombie", count: 70, equipment: null, nameTag: null },
+      { type: "minecraft:husk", count: 30, equipment: null, nameTag: null }
     ],
-    totalMobCount: 14  // 10 zombies + 4 husks (largest encounter)
+    totalMobCount: 100
   },
   {
     id: "phantom_swarm",
@@ -136,9 +134,9 @@ export const ENCOUNTER_TABLE = [
     description: "Nightmares made flesh circle overhead.",
     tier: "legendary",
     mobs: [
-      { type: "minecraft:phantom", count: 6, equipment: null, nameTag: null }
+      { type: "minecraft:phantom", count: 100, equipment: null, nameTag: null }
     ],
-    totalMobCount: 6  // Fewer mobs, but flying and dangerous
+    totalMobCount: 100
   },
   {
     id: "witch_coven",
@@ -146,10 +144,10 @@ export const ENCOUNTER_TABLE = [
     description: "Dark magic corrupts this land.",
     tier: "legendary",
     mobs: [
-      { type: "minecraft:witch", count: 3, equipment: null, nameTag: null },
-      { type: "minecraft:zombie_villager", count: 4, equipment: null, nameTag: "Cursed Villager" }
+      { type: "minecraft:witch", count: 50, equipment: null, nameTag: null },
+      { type: "minecraft:zombie_villager", count: 50, equipment: null, nameTag: "Cursed Villager" }
     ],
-    totalMobCount: 7  // 3 witches + 4 zombie villagers
+    totalMobCount: 100
   }
 ];
 

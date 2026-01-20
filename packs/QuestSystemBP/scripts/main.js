@@ -83,14 +83,16 @@ import {
 
 import { COSTS, STREAK_CONFIG } from "./data/EconomyConfig.js";
 
-// === PHASE 3: ENCOUNTER SYSTEM IMPORTS ===
+// === PHASE 3 & 4: ENCOUNTER SYSTEM IMPORTS ===
 // Spawner functions (mob management)
 import {
   spawnEncounterMobs,
   despawnEncounterMobs,
+  respawnRemainingMobs,
   isEncounterMob,
   getQuestIdFromMob,
-  countRemainingMobs
+  countRemainingMobs,
+  initializeEncounterMobProtection
 } from "./systems/EncounterSpawner.js";
 
 // Location functions (zone selection, terrain validation)
@@ -206,6 +208,9 @@ world.afterEvents.worldInitialize.subscribe(() => {
   // This tick-based system detects when players enter encounter zones
   // and triggers mob spawning when chunks are loaded
   startProximityMonitoring();
+
+  // Initialize encounter mob protection (mobs only killable by players)
+  initializeEncounterMobProtection();
 });
 
 // Load data when player joins AND handle spawn location
@@ -266,6 +271,54 @@ world.afterEvents.playerSpawn.subscribe((ev) => {
         });
       }
     }
+
+    // === PHASE 4: State-aware encounter restoration on login ===
+    // Only handle on initial spawn (login), not respawns after death
+    if (initialSpawn && data?.active?.isEncounter) {
+      const quest = data.active;
+      const progress = data.progress || 0;
+
+      switch (quest.encounterState) {
+        case "pending":
+          // Player hasn't reached the zone yet - remind them
+          if (quest.encounterZone) {
+            const zone = quest.encounterZone;
+            player.sendMessage(`§eYou have an active encounter: §f${quest.encounterName}`);
+            player.sendMessage(`§7Travel to zone: ${zone.center.x}, ${zone.center.z}`);
+          }
+          break;
+
+        case "spawned":
+          // Mobs were despawned on logout - respawn them
+          if (quest.spawnData?.location) {
+            const remaining = quest.totalMobCount - progress;
+
+            if (remaining > 0) {
+              const dimension = player.dimension;
+              const entityIds = respawnRemainingMobs(quest, progress, dimension);
+
+              // Update spawned entity IDs
+              quest.spawnData.spawnedEntityIds = entityIds;
+              PersistenceManager.saveQuestData(player, data);
+
+              player.sendMessage(`§eYour encounter persists. §f${remaining} enemies remain.`);
+              player.sendMessage(`§7Location: ${Math.floor(quest.spawnData.location.x)}, ${Math.floor(quest.spawnData.location.y)}, ${Math.floor(quest.spawnData.location.z)}`);
+            } else {
+              // Progress shows complete but state wasn't updated - fix it
+              quest.encounterState = "complete";
+              PersistenceManager.saveQuestData(player, data);
+              player.sendMessage(`§a${quest.encounterName} §fis complete! Return to the board.`);
+            }
+          }
+          break;
+
+        case "complete":
+          // Encounter done, just needs turn-in
+          player.sendMessage(`§a${quest.encounterName} §fis complete! Return to the board to claim your reward.`);
+          break;
+      }
+    }
+    // === END PHASE 4 ===
   }, 15); // Slightly longer delay to ensure everything is ready
 });
 
@@ -285,6 +338,46 @@ world.afterEvents.playerLeave.subscribe((ev) => {
     });
   }
   playerCatSquad.delete(playerId);
+
+  // === PHASE 4: Encounter cleanup on logout ===
+  // Note: We cannot access player dynamic properties here because the player
+  // object is no longer valid. Instead, we search for any encounter mobs
+  // tagged with this player's quest and despawn them.
+  // The quest data (including spawnData.location) is preserved in the player's
+  // dynamic properties and will be used to respawn mobs on login.
+  try {
+    // Search all dimensions for encounter mobs belonging to this player
+    // We use a tag pattern that includes the player ID
+    const dimensions = ["overworld", "nether", "the_end"];
+    let totalDespawned = 0;
+
+    for (const dimId of dimensions) {
+      try {
+        const dimension = world.getDimension(dimId);
+        // Find all encounter mobs (we can't know the specific quest ID without player data)
+        const entities = dimension.getEntities({ tags: ["sq_encounter_mob"] });
+
+        for (const entity of entities) {
+          // Check if this entity has any tag starting with sq_quest_
+          // For now, despawn ALL encounter mobs when ANY player leaves
+          // This is a simplification - in multiplayer we'd need smarter tracking
+          try {
+            entity.remove();
+            totalDespawned++;
+          } catch (e) { /* Entity may be invalid */ }
+        }
+      } catch (e) {
+        // Dimension access may fail
+      }
+    }
+
+    if (totalDespawned > 0) {
+      console.log(`[main] Player ${playerId} logged out - despawned ${totalDespawned} encounter mobs`);
+    }
+  } catch (error) {
+    console.error(`[main] Error handling encounter cleanup on player leave: ${error}`);
+  }
+  // === END PHASE 4 ===
 });
 
 // Initialize Daily Quests (Global Daily Quests - REMOVED)
@@ -2408,6 +2501,109 @@ function wireInteractions() {
           ev.sender.sendMessage(`§aTeleported to spawn location: ${loc.x}, ${loc.y}, ${loc.z}`);
         });
       }
+
+      // === PHASE 4: Debug commands for logout/login persistence testing ===
+
+      // Simulate logout - despawns mobs without actually leaving
+      if (ev.message === "!encounter test logout") {
+        ev.cancel = true;
+        system.run(() => {
+          const questData = ensureQuestData(ev.sender);
+
+          if (!questData?.active?.isEncounter) {
+            ev.sender.sendMessage(`§cNo active encounter`);
+            return;
+          }
+
+          const quest = questData.active;
+          ev.sender.sendMessage(`§e=== Simulating Logout ===`);
+          ev.sender.sendMessage(`§fState: ${quest.encounterState}`);
+
+          if (quest.encounterState === "spawned" && quest.spawnData) {
+            const dimension = ev.sender.dimension;
+            const despawnCount = despawnEncounterMobs(quest.id, dimension);
+            quest.spawnData.spawnedEntityIds = [];
+            PersistenceManager.saveQuestData(ev.sender, questData);
+            ev.sender.sendMessage(`§aDespawned ${despawnCount} mobs`);
+          } else {
+            ev.sender.sendMessage(`§7No mobs to despawn (state: ${quest.encounterState})`);
+          }
+          ev.sender.sendMessage(`§7Use !encounter test login to simulate login`);
+        });
+      }
+
+      // Simulate login - respawns remaining mobs
+      if (ev.message === "!encounter test login") {
+        ev.cancel = true;
+        system.run(() => {
+          const questData = ensureQuestData(ev.sender);
+
+          if (!questData?.active?.isEncounter) {
+            ev.sender.sendMessage(`§cNo active encounter`);
+            return;
+          }
+
+          const quest = questData.active;
+          const progress = questData.progress || 0;
+
+          ev.sender.sendMessage(`§e=== Simulating Login ===`);
+          ev.sender.sendMessage(`§fState: ${quest.encounterState}`);
+          ev.sender.sendMessage(`§fProgress: ${progress}/${quest.totalMobCount}`);
+
+          if (quest.encounterState === "spawned" && quest.spawnData?.location) {
+            const remaining = quest.totalMobCount - progress;
+
+            if (remaining > 0) {
+              const dimension = ev.sender.dimension;
+              const entityIds = respawnRemainingMobs(quest, progress, dimension);
+              quest.spawnData.spawnedEntityIds = entityIds;
+              PersistenceManager.saveQuestData(ev.sender, questData);
+              ev.sender.sendMessage(`§aRespawned ${entityIds.length} mobs`);
+            } else {
+              ev.sender.sendMessage(`§aNo mobs to respawn - encounter complete`);
+            }
+          } else if (quest.encounterState === "pending") {
+            ev.sender.sendMessage(`§7Encounter pending - travel to zone first`);
+          } else {
+            ev.sender.sendMessage(`§7Encounter complete - return to board`);
+          }
+        });
+      }
+
+      // Show full encounter state details
+      if (ev.message === "!encounter state") {
+        ev.cancel = true;
+        system.run(() => {
+          const questData = ensureQuestData(ev.sender);
+
+          if (!questData?.active?.isEncounter) {
+            ev.sender.sendMessage(`§cNo active encounter`);
+            return;
+          }
+
+          const quest = questData.active;
+          const progress = questData.progress || 0;
+
+          ev.sender.sendMessage(`§e=== Encounter State ===`);
+          ev.sender.sendMessage(`§fName: ${quest.encounterName}`);
+          ev.sender.sendMessage(`§fState: ${quest.encounterState}`);
+          ev.sender.sendMessage(`§fProgress: ${progress}/${quest.totalMobCount}`);
+
+          if (quest.encounterZone) {
+            ev.sender.sendMessage(`§fZone: ${quest.encounterZone.center.x}, ${quest.encounterZone.center.z}`);
+          }
+          if (quest.spawnData?.location) {
+            const loc = quest.spawnData.location;
+            ev.sender.sendMessage(`§fSpawn: ${Math.floor(loc.x)}, ${Math.floor(loc.y)}, ${Math.floor(loc.z)}`);
+            ev.sender.sendMessage(`§fEntity IDs stored: ${quest.spawnData.spawnedEntityIds?.length || 0}`);
+
+            // Count ACTUAL mobs still alive in the world
+            const actualCount = countRemainingMobs(quest.id, ev.sender.dimension);
+            ev.sender.sendMessage(`§fActual mobs alive: §c${actualCount}`);
+          }
+        });
+      }
+      // === END PHASE 4 DEBUG COMMANDS ===
     });
   }
 }

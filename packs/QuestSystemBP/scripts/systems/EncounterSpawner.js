@@ -84,6 +84,63 @@ const TAG_ENCOUNTER_MOB = "sq_encounter_mob";
 const TAG_QUEST_PREFIX = "sq_quest_";
 
 // ============================================================================
+// ENCOUNTER MOB PROTECTION
+// ============================================================================
+
+let damageProtectionInitialized = false;
+
+/**
+ * Damage causes to block for encounter mobs
+ * Only blocks sunlight/fire - lets drowning, lava, fall damage through
+ * so mobs don't get permanently stuck
+ */
+const BLOCKED_DAMAGE_CAUSES = [
+  "fire",
+  "fireTick",
+  "fire_tick",
+  "onFire",
+  "burning"
+];
+
+/**
+ * Initialize damage protection for encounter mobs
+ * Only blocks fire/sunlight damage - other environmental damage goes through
+ * This prevents undead burning but allows stuck mobs to die naturally
+ *
+ * Call this once at world initialization
+ */
+export function initializeEncounterMobProtection() {
+  if (damageProtectionInitialized) return;
+
+  const damageEvent = world.beforeEvents.entityDamage ?? world.beforeEvents.entityHurt;
+  if (!damageEvent) {
+    console.warn("[EncounterSpawner] Could not initialize damage protection - no damage event available");
+    return;
+  }
+
+  damageEvent.subscribe((ev) => {
+    const entity = ev.entity ?? ev.hurtEntity;
+    if (!entity) return;
+
+    // Only protect encounter mobs
+    try {
+      if (!entity.hasTag(TAG_ENCOUNTER_MOB)) return;
+    } catch {
+      return; // Entity invalid
+    }
+
+    // Only block fire/sunlight damage - let other environmental damage through
+    const cause = ev.damageSource?.cause;
+    if (cause && BLOCKED_DAMAGE_CAUSES.includes(cause)) {
+      ev.cancel = true;
+    }
+  });
+
+  damageProtectionInitialized = true;
+  console.log("[EncounterSpawner] Encounter mob fire protection initialized");
+}
+
+// ============================================================================
 // MOB SPAWNING
 // ============================================================================
 
@@ -124,86 +181,61 @@ export function spawnEncounterMobs(quest, location, dimension) {
   const spawnedEntityIds = [];
 
   // ========================================================================
-  // CHUNK LOADING FIX
+  // PHASE 3 UPDATE: Simplified spawning
   // ========================================================================
-  // Ensure the spawn chunk is loaded before attempting to spawn entities.
-  // Without this, spawns fail with LocationInUnloadedChunkError when the
-  // player accepts quest from a distant location (e.g., quest board).
+  // In Phase 3, player triggers spawn by being NEAR the zone, so chunks are
+  // already loaded. We no longer need tickingarea commands or delays.
   //
-  // Strategy: Use tickingarea command + delayed spawn to allow chunk loading
-  try {
-    // Force load the chunk using tickingarea command
-    // This ensures the chunk is loaded and ticking for entity spawns
-    dimension.runCommand(`tickingarea add circle ${location.x} ${location.y} ${location.z} 1 encounter_spawn_temp`);
-  } catch (error) {
-    // Ticking area may already exist or command may fail
-    // Log but continue - spawn will fail naturally if chunk isn't loaded
-    console.warn(`[EncounterSpawner] Could not create ticking area: ${error}`);
-  }
+  // The original Phase 2 code used tickingarea + 1s delay because spawning
+  // happened at quest accept (far from spawn location). That's no longer needed.
+  // ========================================================================
 
-  // Delay spawn by 1 second (20 ticks) to allow chunk to fully load
-  // This is necessary because tickingarea command doesn't guarantee immediate loading
-  system.runTimeout(() => {
-    // Iterate through mob groups (e.g., [{ type: "skeleton", count: 8 }, { type: "stray", count: 3 }])
-    for (const mobGroup of quest.encounterMobs) {
-      // Spawn each individual mob in the group
-      for (let i = 0; i < mobGroup.count; i++) {
-        // Calculate position variance to prevent stacking
-        // Random value between -0.5 and +0.5, multiplied by 6 = range of ±3 blocks
-        const variance = {
-          x: (Math.random() - 0.5) * 6,
-          z: (Math.random() - 0.5) * 6
-        };
+  console.log(`[EncounterSpawner] Starting spawn for quest ${quest.id} at (${location.x}, ${location.y}, ${location.z})`);
 
-        const spawnPos = {
-          x: location.x + variance.x,
-          y: location.y,
-          z: location.z + variance.z
-        };
+  // Iterate through mob groups (e.g., [{ type: "minecraft:skeleton", count: 8 }, { type: "minecraft:stray", count: 3 }])
+  for (const mobGroup of quest.encounterMobs) {
+    // Spawn each individual mob in the group
+    for (let i = 0; i < mobGroup.count; i++) {
+      // Calculate position variance to prevent stacking
+      // Random value between -0.5 and +0.5, multiplied by 6 = range of ±3 blocks
+      const variance = {
+        x: (Math.random() - 0.5) * 6,
+        z: (Math.random() - 0.5) * 6
+      };
 
-        try {
-          // Spawn the entity
-          const entity = dimension.spawnEntity(mobGroup.type, spawnPos);
+      const spawnPos = {
+        x: location.x + variance.x,
+        y: location.y,
+        z: location.z + variance.z
+      };
 
-          // Apply universal encounter mob tag
-          entity.addTag(TAG_ENCOUNTER_MOB);
+      try {
+        // Spawn the entity
+        const entity = dimension.spawnEntity(mobGroup.type, spawnPos);
 
-          // Apply quest-specific tag for tracking
-          entity.addTag(`${TAG_QUEST_PREFIX}${quest.id}`);
+        // Apply universal encounter mob tag
+        entity.addTag(TAG_ENCOUNTER_MOB);
 
-          // Apply custom name tag if defined (e.g., "Frost Archer" for strays)
-          if (mobGroup.nameTag) {
-            entity.nameTag = mobGroup.nameTag;
-          }
+        // Apply quest-specific tag for tracking
+        entity.addTag(`${TAG_QUEST_PREFIX}${quest.id}`);
 
-          // Track entity ID for later despawn operations
-          spawnedEntityIds.push(entity.id);
-        } catch (error) {
-          // Log spawn failure but continue with remaining mobs
-          console.error(`[EncounterSpawner] Failed to spawn ${mobGroup.type}: ${error}`);
+        // Apply custom name tag if defined (e.g., "Frost Archer" for strays)
+        if (mobGroup.nameTag) {
+          entity.nameTag = mobGroup.nameTag;
         }
+
+        // Track entity ID for later despawn operations
+        spawnedEntityIds.push(entity.id);
+      } catch (error) {
+        // Log spawn failure but continue with remaining mobs
+        console.error(`[EncounterSpawner] Failed to spawn ${mobGroup.type}: ${error}`);
       }
     }
+  }
 
-    // Log spawn operation for debugging
-    console.log(`[EncounterSpawner] Spawned ${spawnedEntityIds.length}/${quest.totalMobCount} mobs for quest ${quest.id}`);
+  // Log spawn operation for debugging
+  console.log(`[EncounterSpawner] Spawned ${spawnedEntityIds.length}/${quest.totalMobCount} mobs for quest ${quest.id}`);
 
-    // ========================================================================
-    // CLEANUP: Remove temporary ticking area
-    // ========================================================================
-    // Now that mobs are spawned, we can remove the ticking area.
-    // The mobs will persist even after the ticking area is removed.
-    try {
-      dimension.runCommand(`tickingarea remove encounter_spawn_temp`);
-    } catch (error) {
-      // Area may not exist or removal may fail - not critical
-      console.warn(`[EncounterSpawner] Could not remove ticking area: ${error}`);
-    }
-  }, 20); // 20 ticks = 1 second delay
-
-  // Return empty array immediately - actual spawn happens asynchronously
-  // Note: This means spawn data will initially show 0 entity IDs
-  // The actual entity IDs are populated after the delayed spawn
   return spawnedEntityIds;
 }
 
@@ -269,6 +301,96 @@ export function despawnEncounterMobs(questId, dimension) {
   console.log(`[EncounterSpawner] Despawned ${despawnCount} mobs for quest ${questId}`);
 
   return despawnCount;
+}
+
+// ============================================================================
+// MOB RESPAWNING (PHASE 4: Logout/Login Persistence)
+// ============================================================================
+
+/**
+ * Respawn remaining mobs for an encounter after player login
+ * Only spawns mobs that haven't been killed yet (based on progress)
+ *
+ * WORKFLOW:
+ * 1. Calculate how many mobs need to respawn (totalMobCount - progress)
+ * 2. Spawn mobs from each group until we've spawned enough
+ * 3. Apply tags and name tags as in original spawn
+ * 4. Return entity IDs for tracking
+ *
+ * USE CASES:
+ * - Player logs back in with spawned encounter (mobs were despawned on logout)
+ * - Server restart recovery (future Phase 5)
+ *
+ * IMPORTANT:
+ * - Uses stored spawnData.location from original spawn
+ * - Player dimension is used (player must be near for chunks to be loaded)
+ * - Progress determines how many mobs to spawn (remaining = total - killed)
+ *
+ * @param {Object} quest - The encounter quest object
+ * @param {number} progress - Current kill progress
+ * @param {Dimension} dimension - Minecraft dimension to spawn in
+ * @returns {string[]} Array of spawned entity IDs
+ *
+ * @example
+ * const entityIds = respawnRemainingMobs(quest, 3, player.dimension);
+ * // If quest.totalMobCount is 6 and progress is 3, spawns 3 mobs
+ */
+export function respawnRemainingMobs(quest, progress, dimension) {
+  if (!quest.spawnData || !quest.spawnData.location) {
+    console.error(`[EncounterSpawner] Cannot respawn - no spawn location stored`);
+    return [];
+  }
+
+  const location = quest.spawnData.location;
+  const spawnedEntityIds = [];
+
+  // Calculate how many mobs need to respawn
+  let mobsToSpawn = quest.totalMobCount - progress;
+
+  if (mobsToSpawn <= 0) {
+    console.log(`[EncounterSpawner] No mobs to respawn - encounter complete`);
+    return [];
+  }
+
+  // Spawn mobs from each group until we've spawned enough
+  for (const mobGroup of quest.encounterMobs) {
+    if (mobsToSpawn <= 0) break;
+
+    const countFromGroup = Math.min(mobGroup.count, mobsToSpawn);
+
+    for (let i = 0; i < countFromGroup; i++) {
+      const variance = {
+        x: (Math.random() - 0.5) * 6,
+        z: (Math.random() - 0.5) * 6
+      };
+
+      const spawnPos = {
+        x: location.x + variance.x,
+        y: location.y,
+        z: location.z + variance.z
+      };
+
+      try {
+        const entity = dimension.spawnEntity(mobGroup.type, spawnPos);
+
+        entity.addTag(TAG_ENCOUNTER_MOB);
+        entity.addTag(`${TAG_QUEST_PREFIX}${quest.id}`);
+
+        if (mobGroup.nameTag) {
+          entity.nameTag = mobGroup.nameTag;
+        }
+
+        spawnedEntityIds.push(entity.id);
+      } catch (error) {
+        console.error(`[EncounterSpawner] Failed to respawn ${mobGroup.type}: ${error}`);
+      }
+    }
+
+    mobsToSpawn -= countFromGroup;
+  }
+
+  console.log(`[EncounterSpawner] Respawned ${spawnedEntityIds.length} mobs for quest ${quest.id}`);
+  return spawnedEntityIds;
 }
 
 // ============================================================================

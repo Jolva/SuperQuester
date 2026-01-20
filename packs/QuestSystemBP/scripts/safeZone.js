@@ -206,18 +206,30 @@ export function registerSafeZoneEvents() {
     // Allow manual spawning by admins/testing
     if (cause === "SpawnEgg" || cause === "Command" || cause === "Override") return;
 
-    // ENCOUNTER SYSTEM EXCEPTION: Allow encounter mobs (they have special tags)
-    // Check for encounter mob tag before removing
-    if (entity.hasTag && entity.hasTag("sq_encounter_mob")) {
-      return; // This is an encounter mob - don't remove it
-    }
+    // Only check hostiles in safe zone
+    if (!isHostile(entity.typeId) || !isInSafeZone(entity.location)) return;
 
-    if (isHostile(entity.typeId) && isInSafeZone(entity.location)) {
-      console.warn(`[SafeZone] Removing unauthorized hostile: ${entity.typeId} (Cause: ${cause})`);
+    // ENCOUNTER SYSTEM EXCEPTION: Delay check to allow tags to be applied
+    // The encounter spawner adds tags immediately after spawn, but this event
+    // fires synchronously. Wait 1 tick then check for the tag.
+    const entityId = entity.id;
+    system.runTimeout(() => {
       try {
+        // Re-fetch entity - it may have been removed or become invalid
+        if (!entity.isValid()) return;
+
+        // Check for encounter mob tag (applied by EncounterSpawner)
+        if (entity.hasTag && entity.hasTag("sq_encounter_mob")) {
+          return; // This is an encounter mob - don't remove it
+        }
+
+        // Not an encounter mob - remove it
+        console.warn(`[SafeZone] Removing unauthorized hostile: ${entity.typeId} (Cause: ${cause})`);
         entity.remove();
-      } catch (e) { }
-    }
+      } catch (e) {
+        // Entity may have been removed already
+      }
+    }, 1); // 1 tick delay to allow tags to be applied
   });
 
   // 6. Prevent Enderman block pickup in safe zone

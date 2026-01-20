@@ -126,6 +126,7 @@ function checkAllPlayers() {
 
 /**
  * Check if a player has entered their encounter zone
+ * Also shows distance ticker for spawned encounters
  * @param {Player} player
  */
 function checkPlayerProximity(player) {
@@ -142,13 +143,61 @@ function checkPlayerProximity(player) {
   // Early exit: Not an encounter quest
   if (!questData.active.isEncounter) return;
 
-  // Early exit: Already spawned or complete
-  if (questData.active.encounterState !== "pending") return;
+  const quest = questData.active;
+
+  // === PERSISTENT OBJECTIVE DISPLAY FOR SPAWNED ENCOUNTERS ===
+  // Use actionbar only - less intrusive than title/subtitle
+  if (quest.encounterState === "spawned" && quest.spawnData?.location) {
+    const spawnLoc = quest.spawnData.location;
+    const playerLoc = player.location;
+    const distance = Math.floor(calculateDistance(playerLoc, spawnLoc));
+
+    // Count ACTUAL mobs alive (not just expected remaining)
+    const dimension = player.dimension;
+    let actualMobCount = 0;
+    try {
+      const tagToFind = `sq_quest_${quest.id}`;
+      const entities = dimension.getEntities({ tags: [tagToFind] });
+      actualMobCount = [...entities].length;
+    } catch (e) {
+      // Query may fail
+    }
+
+    // Calculate progress
+    const progress = quest.totalMobCount - actualMobCount;
+
+    try {
+      // Actionbar only - compact, persistent, non-intrusive
+      player.runCommandAsync(`titleraw @s actionbar {"rawtext":[{"text":"§6${quest.encounterName} §7| §fKill: §c${progress}§7/§c${quest.totalMobCount} §7| §e${distance}m away"}]}`);
+    } catch (e) {
+      // Actionbar may fail, not critical
+    }
+    return; // Don't check for zone entry if already spawned
+  }
+
+  // === PENDING ENCOUNTER: Show travel objective ===
+  if (quest.encounterState === "pending" && quest.encounterZone) {
+    const zone = quest.encounterZone;
+    const playerLoc = player.location;
+    const distanceToZone = Math.floor(calculateDistance(playerLoc, zone.center));
+
+    try {
+      // Actionbar only - compact travel info
+      player.runCommandAsync(`titleraw @s actionbar {"rawtext":[{"text":"§6${quest.encounterName} §7| §fTravel to zone §7| §e${distanceToZone}m §7(${zone.center.x}, ${zone.center.z})"}]}`);
+    } catch (e) {
+      // Actionbar may fail
+    }
+  }
+
+  // Early exit: Already complete
+  if (quest.encounterState === "complete") return;
+
+  // Early exit: Not pending (shouldn't happen after above checks)
+  if (quest.encounterState !== "pending") return;
 
   // Early exit: No zone assigned (shouldn't happen, but safety check)
-  if (!questData.active.encounterZone) return;
+  if (!quest.encounterZone) return;
 
-  const quest = questData.active;
   const zone = quest.encounterZone;
 
   // Check if player is in the zone
@@ -170,7 +219,6 @@ function checkPlayerProximity(player) {
  * @param {object} questData
  */
 function triggerEncounterSpawn(player, questData) {
-  const quest = questData.active;
   const dimension = player.dimension;
 
   // Stage 1: Alert player
@@ -197,8 +245,12 @@ function triggerEncounterSpawn(player, questData) {
 function completeSpawnSequence(player, questData, dimension) {
   const quest = questData.active;
 
+  console.log(`[EncounterProximity] completeSpawnSequence called for ${player.name}`);
+  console.log(`[EncounterProximity] Quest exists: ${!!quest}, State: ${quest?.encounterState}`);
+
   // Verify quest is still valid (player may have abandoned during pause)
   if (!quest || quest.encounterState !== "pending") {
+    console.warn(`[EncounterProximity] Early return - quest invalid or not pending`);
     playersBeingProcessed.delete(player.id);
     return;
   }
@@ -207,14 +259,20 @@ function completeSpawnSequence(player, questData, dimension) {
   let spawnLocation = findSpawnPointNearPlayer(dimension, player);
   let usedFallback = false;
 
+  console.log(`[EncounterProximity] Spawn location found: ${!!spawnLocation}`);
+
   if (!spawnLocation) {
     spawnLocation = getFallbackLocation(quest.encounterZone.tier);
     usedFallback = true;
     console.warn(`[EncounterProximity] Using fallback for ${quest.id}`);
   }
 
+  console.log(`[EncounterProximity] Final spawn location: (${spawnLocation.x}, ${spawnLocation.y}, ${spawnLocation.z})`);
+
   // Spawn the mobs
+  console.log(`[EncounterProximity] Calling spawnEncounterMobs...`);
   const entityIds = spawnEncounterMobs(quest, spawnLocation, dimension);
+  console.log(`[EncounterProximity] spawnEncounterMobs returned ${entityIds.length} entity IDs`);
 
   // Update quest state
   quest.encounterState = "spawned";

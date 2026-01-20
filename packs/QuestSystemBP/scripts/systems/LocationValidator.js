@@ -66,10 +66,13 @@ const ZONE_TRIGGER_RADIUS = 50;
 /**
  * Spawn distance from player when they arrive at zone
  * Mobs spawn in this ring around the player
+ *
+ * Set to 18-22 blocks: close enough to guarantee loaded chunks,
+ * far enough to not spawn directly on top of player
  */
 const SPAWN_DISTANCE = {
-  inner: 40,  // Far enough they don't see mob pop-in
-  outer: 60   // Close enough to be in loaded chunks
+  inner: 18,
+  outer: 22
 };
 
 /**
@@ -282,19 +285,34 @@ export function findSpawnPointNearPlayer(dimension, player) {
 
       if (!topBlock) continue;
 
-      // Check if surface is valid
+      // Check if surface is valid (not water, lava, leaves, etc.)
       if (INVALID_SPAWN_BLOCKS.includes(topBlock.typeId)) continue;
 
       // Check for air above (mobs need headroom)
       const spawnY = topBlock.location.y + 1;
       const blockAbove = dimension.getBlock({ x: point.x, y: spawnY, z: point.z });
 
-      if (blockAbove && blockAbove.typeId !== "minecraft:air") continue;
+      // Must be AIR - not water, not any other block
+      if (!blockAbove || blockAbove.typeId !== "minecraft:air") continue;
 
       // Check second block above for tall mobs
       const blockAbove2 = dimension.getBlock({ x: point.x, y: spawnY + 1, z: point.z });
 
-      if (blockAbove2 && blockAbove2.typeId !== "minecraft:air") continue;
+      // Must also be AIR
+      if (!blockAbove2 || blockAbove2.typeId !== "minecraft:air") continue;
+
+      // Additional check: make sure we're above sea level or at least not underwater
+      // In swamps, the "topmost block" can be mud at the bottom of water
+      // Check if there's water anywhere in the column above
+      let hasWaterAbove = false;
+      for (let checkY = spawnY; checkY <= spawnY + 5; checkY++) {
+        const checkBlock = dimension.getBlock({ x: point.x, y: checkY, z: point.z });
+        if (checkBlock && (checkBlock.typeId === "minecraft:water" || checkBlock.typeId === "minecraft:flowing_water")) {
+          hasWaterAbove = true;
+          break;
+        }
+      }
+      if (hasWaterAbove) continue;
 
       console.log(`[LocationValidator] Found valid spawn at (${point.x}, ${spawnY}, ${point.z}) on attempt ${attempt + 1}`);
 
