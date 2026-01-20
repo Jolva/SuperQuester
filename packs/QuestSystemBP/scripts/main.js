@@ -83,6 +83,17 @@ import {
 
 import { COSTS, STREAK_CONFIG } from "./data/EconomyConfig.js";
 
+// === PHASE 2: ENCOUNTER SYSTEM IMPORTS ===
+// Encounter mob spawning, despawning, and tracking utilities
+import {
+  spawnEncounterMobs,
+  despawnEncounterMobs,
+  getTestSpawnLocation,
+  isEncounterMob,
+  getQuestIdFromMob,
+  countRemainingMobs
+} from "./systems/EncounterSpawner.js";
+
 // =============================================================================
 // CONSTANTS — WORLD LOCATIONS
 // =============================================================================
@@ -944,10 +955,50 @@ function handleQuestAccept(player, questIndex) {
   data.active = { ...quest };  // Copy to active
   data.progress = 0;
   data.available[questIndex] = null;  // Mark slot as taken
+
+  // ========================================================================
+  // PHASE 2: ENCOUNTER SYSTEM - Spawn Mobs on Quest Accept
+  // ========================================================================
+  // If this is an encounter quest (rare/legendary), spawn the mob group
+  // at a fixed test location (30 blocks from board). Phase 3 will replace
+  // this with ring-based random spawning with terrain validation.
+  //
+  // WORKFLOW:
+  // 1. Check if quest is encounter type (has isEncounter flag)
+  // 2. Get test spawn location (Phase 2: fixed at X=102, Y=75, Z=-278)
+  // 3. Spawn all mobs from encounterMobs array
+  // 4. Tag mobs with quest ID for kill tracking
+  // 5. Store spawn data on quest for later cleanup
+  // 6. Notify player that encounter has appeared
+  //
+  // IMPORTANT: This spawning happens BEFORE saveQuestData() so that
+  // spawnData is persisted with the quest state.
+  // ========================================================================
+  if (data.active.isEncounter) {
+    const spawnLocation = getTestSpawnLocation();  // Phase 2: Fixed 30 blocks east
+    const dimension = player.dimension;
+
+    // Spawn all mobs for this encounter
+    const entityIds = spawnEncounterMobs(data.active, spawnLocation, dimension);
+
+    // Store spawn data on the quest for cleanup operations
+    // This gets saved with quest state below
+    data.active.spawnData = {
+      location: spawnLocation,
+      spawnedEntityIds: entityIds,
+      dimensionId: dimension.id
+    };
+
+    // Notify player that encounter has spawned
+    player.sendMessage(`§e${data.active.encounterName} §fhas appeared nearby!`);
+  }
+  // === END ENCOUNTER SPAWNING ===
+
+  // Save quest data (includes spawnData if encounter)
   PersistenceManager.saveQuestData(player, data);
 
   // Start HUD if applicable
-  if (quest.type === "kill" || quest.type === "mine") {
+  if (quest.type === "kill" || quest.type === "mine" || quest.type === "encounter") {
     updateQuestHud(player, { ...data.active, progress: 0, goal: quest.requiredCount, status: "active" });
   }
 
@@ -968,6 +1019,33 @@ function handleQuestAbandon(player) {
   }
 
   const quest = data.active;
+
+  // ========================================================================
+  // PHASE 2: ENCOUNTER SYSTEM - Despawn Mobs on Abandon
+  // ========================================================================
+  // If this is an encounter quest, despawn all mobs and clear spawn data
+  // so the quest can be re-accepted with fresh mob spawns.
+  //
+  // WORKFLOW:
+  // 1. Check if quest is encounter type
+  // 2. Check if spawnData exists (quest was accepted and mobs spawned)
+  // 3. Get dimension from spawn data
+  // 4. Despawn all encounter mobs
+  // 5. Clear spawnData from quest object
+  //
+  // IMPORTANT: Clearing spawnData allows the quest to be re-accepted.
+  // When re-accepted, new mobs will spawn at a potentially different location.
+  // ========================================================================
+  if (quest.isEncounter && quest.spawnData) {
+    const dimension = world.getDimension(quest.spawnData.dimensionId || "overworld");
+    const despawnedCount = despawnEncounterMobs(quest.id, dimension);
+
+    // Clear spawn data so quest can be re-accepted
+    quest.spawnData = null;
+
+    console.log(`[Encounter] Abandoned quest ${quest.id}, despawned ${despawnedCount} mobs`);
+  }
+  // === END ENCOUNTER DESPAWN ===
 
   // Find an empty slot to return it to (or first slot if somehow all full)
   const emptyIndex = data.available.findIndex(slot => slot === null);
@@ -1561,6 +1639,77 @@ function handleEntityDeath(ev) {
   const { damageSource, deadEntity } = ev;
   if (!deadEntity) return;
 
+  // ========================================================================
+  // PHASE 2: ENCOUNTER SYSTEM - Kill Tracking via Tags
+  // ========================================================================
+  // Check if this is an encounter mob FIRST, before standard kill quest logic.
+  // Encounter mobs use tag-based tracking instead of entity type matching.
+  //
+  // KILL ATTRIBUTION MODEL (Phase 2):
+  // - ANY death of an encounter mob counts (player kill, environmental, etc.)
+  // - No need to check who killed it - just increment quest progress
+  // - Find quest owner by iterating all players (acceptable for small server)
+  //
+  // WORKFLOW:
+  // 1. Check if dead entity has encounter mob tag
+  // 2. Extract quest ID from entity tags
+  // 3. Find player who owns that quest
+  // 4. Increment their progress
+  // 5. Notify player and check for completion
+  // 6. Return early to skip standard kill quest logic
+  //
+  // IMPORTANT: This block runs BEFORE the killer check, so environmental
+  // kills (lava, fall damage) are properly attributed to the quest owner.
+  // ========================================================================
+  if (isEncounterMob(deadEntity)) {
+    const questId = getQuestIdFromMob(deadEntity);
+
+    if (questId) {
+      // Find which player owns this quest
+      // For small servers (3 players), iterating is acceptable
+      // For larger servers, consider a lookup table: questId -> playerId
+      for (const player of world.getPlayers()) {
+        const questData = ensureQuestData(player);
+
+        // Check if this player owns the encounter quest
+        if (questData.active &&
+            questData.active.isEncounter &&
+            questData.active.id === questId) {
+
+          // Increment progress
+          questData.progress++;
+
+          // Calculate remaining mobs
+          const remaining = questData.active.totalMobCount - questData.progress;
+
+          // Notify player of progress
+          if (remaining > 0) {
+            player.sendMessage(`§a${questData.active.encounterName}: §f${questData.progress}/${questData.active.totalMobCount} §7(${remaining} remaining)`);
+            player.playSound("quest.progress_tick", { volume: 0.6, pitch: 1.0 });
+          } else {
+            // All mobs killed - quest complete!
+            player.sendMessage(`§a${questData.active.encounterName}: §6COMPLETE! §7Return to the board.`);
+            player.playSound("random.levelup");
+            markQuestComplete(player, questData.active);
+          }
+
+          // Update HUD
+          updateQuestHud(player, { ...questData.active, progress: questData.progress, goal: questData.active.totalMobCount, status: "active" });
+
+          // Save progress
+          PersistenceManager.saveQuestData(player, questData);
+
+          // Only one player can own this quest - stop searching
+          break;
+        }
+      }
+    }
+
+    // Encounter mob handled - skip standard kill quest logic
+    return;
+  }
+  // === END ENCOUNTER KILL TRACKING ===
+
   const fullId = deadEntity.typeId;
   const simpleId = fullId.replace("minecraft:", "");
   const mobType = getMobType(deadEntity);
@@ -1704,12 +1853,41 @@ function handleQuestTurnIn(player) {
         }
       }
     }
-  } else if (quest.type === "kill" || quest.type === "mine") {
+  } else if (quest.type === "kill" || quest.type === "mine" || quest.type === "encounter") {
     if (data.progress < quest.requiredCount) {
       player.sendMessage(`§cProgress: ${data.progress}/${quest.requiredCount}§r`);
       return;
     }
   }
+
+  // ========================================================================
+  // PHASE 2: ENCOUNTER SYSTEM - Despawn Remaining Mobs on Turn-In
+  // ========================================================================
+  // If this is an encounter quest, despawn any remaining mobs before
+  // awarding rewards. This prevents orphaned mobs from staying in the world.
+  //
+  // WORKFLOW:
+  // 1. Check if quest is encounter type
+  // 2. Check if spawnData exists (quest was accepted and mobs spawned)
+  // 3. Get dimension from spawn data
+  // 4. Call despawnEncounterMobs() to remove all tagged mobs
+  //
+  // NOTE: Most mobs should already be dead (progress == totalMobCount),
+  // but this handles edge cases like:
+  // - Mobs killed by other players after quest complete
+  // - Environmental kills that completed the quest
+  // - Mobs that wandered away but are still alive
+  // ========================================================================
+  if (quest.isEncounter && quest.spawnData) {
+    const dimension = world.getDimension(quest.spawnData.dimensionId || "overworld");
+    const despawnedCount = despawnEncounterMobs(quest.id, dimension);
+
+    // Log for debugging (in case some mobs remained after quest complete)
+    if (despawnedCount > 0) {
+      console.log(`[Encounter] Despawned ${despawnedCount} remaining mobs on turn-in for quest ${quest.id}`);
+    }
+  }
+  // === END ENCOUNTER DESPAWN ===
 
   // === SUCCESSFUL TURN-IN ===
 
@@ -2030,6 +2208,90 @@ function wireInteractions() {
             count++;
           }
           ev.sender.sendMessage(`§aRegistered ${count} player name(s) for leaderboard.§r`);
+        });
+      }
+
+      // ========================================================================
+      // PHASE 1 TESTING COMMANDS: Encounter System Validation
+      // ========================================================================
+      // These commands test the encounter data layer before mob spawning is added.
+      // Test the encounter table, quest generation, and data integrity.
+      //
+      // Available commands:
+      // - !encounter test table: Show encounter counts by tier
+      // - !encounter test generate rare: Generate and display a rare encounter quest
+      // - !encounter test generate legendary: Generate and display a legendary encounter quest
+      // ========================================================================
+
+      // Test: Encounter table validation
+      if (ev.message === "!encounter test table") {
+        ev.cancel = true;
+        system.run(async () => {
+          try {
+            const { getEncountersByTier, ENCOUNTER_TABLE } = await import("./data/EncounterTable.js");
+            ev.sender.sendMessage(`§a=== Encounter Table Status ===`);
+            ev.sender.sendMessage(`§fTotal encounters: §e${ENCOUNTER_TABLE.length}`);
+            ev.sender.sendMessage(`§fRare encounters: §e${getEncountersByTier("rare").length}`);
+            ev.sender.sendMessage(`§fLegendary encounters: §6${getEncountersByTier("legendary").length}`);
+            ev.sender.sendMessage(`§7Use !encounter test generate <tier> to test generation`);
+          } catch (error) {
+            ev.sender.sendMessage(`§cError loading encounter table: ${error.message}`);
+            console.error("[EncounterTest] Table load failed:", error);
+          }
+        });
+      }
+
+      // Test: Generate rare encounter quest
+      if (ev.message === "!encounter test generate rare") {
+        ev.cancel = true;
+        system.run(async () => {
+          try {
+            const { generateEncounterQuest } = await import("./systems/EncounterManager.js");
+            const quest = generateEncounterQuest("rare");
+
+            if (quest) {
+              ev.sender.sendMessage(`§a=== Rare Encounter Generated ===`);
+              ev.sender.sendMessage(`§fName: §e${quest.encounterName}`);
+              ev.sender.sendMessage(`§fID: §7${quest.id}`);
+              ev.sender.sendMessage(`§fMobs: §e${quest.totalMobCount}`);
+              ev.sender.sendMessage(`§fSP Reward: §e${quest.reward.scoreboardIncrement}`);
+              ev.sender.sendMessage(`§fItem Reward: §e${quest.reward.rewardItems[0]?.amount || 0}x ${quest.reward.rewardItems[0]?.typeId || "none"}`);
+              ev.sender.sendMessage(`§fType: §7${quest.type}`);
+              ev.sender.sendMessage(`§fisEncounter: §7${quest.isEncounter}`);
+            } else {
+              ev.sender.sendMessage(`§cFailed to generate rare encounter`);
+            }
+          } catch (error) {
+            ev.sender.sendMessage(`§cError generating encounter: ${error.message}`);
+            console.error("[EncounterTest] Generation failed:", error);
+          }
+        });
+      }
+
+      // Test: Generate legendary encounter quest
+      if (ev.message === "!encounter test generate legendary") {
+        ev.cancel = true;
+        system.run(async () => {
+          try {
+            const { generateEncounterQuest } = await import("./systems/EncounterManager.js");
+            const quest = generateEncounterQuest("legendary");
+
+            if (quest) {
+              ev.sender.sendMessage(`§6=== Legendary Encounter Generated ===`);
+              ev.sender.sendMessage(`§fName: §6${quest.encounterName}`);
+              ev.sender.sendMessage(`§fID: §7${quest.id}`);
+              ev.sender.sendMessage(`§fMobs: §6${quest.totalMobCount}`);
+              ev.sender.sendMessage(`§fSP Reward: §6${quest.reward.scoreboardIncrement}`);
+              ev.sender.sendMessage(`§fItem Reward: §6${quest.reward.rewardItems[0]?.amount || 0}x ${quest.reward.rewardItems[0]?.typeId || "none"}`);
+              ev.sender.sendMessage(`§fType: §7${quest.type}`);
+              ev.sender.sendMessage(`§fisEncounter: §7${quest.isEncounter}`);
+            } else {
+              ev.sender.sendMessage(`§cFailed to generate legendary encounter`);
+            }
+          } catch (error) {
+            ev.sender.sendMessage(`§cError generating encounter: ${error.message}`);
+            console.error("[EncounterTest] Generation failed:", error);
+          }
         });
       }
     });
@@ -2588,6 +2850,111 @@ system.afterEvents.scriptEventReceive.subscribe((event) => {
     } else {
       player.sendMessage("§cFailed to award SP.");
     }
+  }
+});
+
+// ============================================================================
+// PHASE 2: ENCOUNTER SYSTEM - Debug Script Events
+// ============================================================================
+// Admin commands for testing encounter functionality
+// These use /scriptevent instead of chat commands for reliability
+//
+// Available commands:
+// - /scriptevent sq:encounter info - Show active encounter details
+// - /scriptevent sq:encounter count - Count remaining alive mobs
+// - /scriptevent sq:encounter complete - Force complete active encounter
+// - /scriptevent sq:encounter spawn - Spawn test encounter at player location
+// - /scriptevent sq:encounter despawn - Despawn test encounter mobs
+// ============================================================================
+system.afterEvents.scriptEventReceive.subscribe((event) => {
+  // Only handle encounter-related events
+  if (!event.id.startsWith("sq:encounter")) return;
+
+  const player = event.sourceEntity;
+  if (!player || player.typeId !== "minecraft:player") {
+    console.warn("[Encounter] Commands must be run by a player");
+    return;
+  }
+
+  const command = event.message.trim();
+
+  // === INFO: Show active encounter details ===
+  if (command === "info") {
+    const questData = ensureQuestData(player);
+
+    if (questData.active && questData.active.isEncounter) {
+      const q = questData.active;
+      player.sendMessage(`§e=== Active Encounter ===`);
+      player.sendMessage(`§fName: ${q.encounterName}`);
+      player.sendMessage(`§fProgress: ${questData.progress}/${q.totalMobCount}`);
+      player.sendMessage(`§fQuest ID: ${q.id}`);
+
+      if (q.spawnData) {
+        const loc = q.spawnData.location;
+        player.sendMessage(`§fSpawn: ${Math.floor(loc.x)}, ${Math.floor(loc.y)}, ${Math.floor(loc.z)}`);
+        player.sendMessage(`§fSpawned IDs: ${q.spawnData.spawnedEntityIds.length}`);
+      } else {
+        player.sendMessage(`§7No spawn data (not yet accepted?)`);
+      }
+    } else {
+      player.sendMessage(`§cNo active encounter quest`);
+    }
+  }
+
+  // === COUNT: Count remaining alive mobs ===
+  else if (command === "count") {
+    const questData = ensureQuestData(player);
+
+    if (questData.active && questData.active.isEncounter) {
+      const remaining = countRemainingMobs(questData.active.id, player.dimension);
+      player.sendMessage(`§eAlive mobs: ${remaining}`);
+      player.sendMessage(`§7Progress: ${questData.progress}/${questData.active.totalMobCount}`);
+    } else {
+      player.sendMessage(`§cNo active encounter quest`);
+    }
+  }
+
+  // === COMPLETE: Force complete active encounter (for testing turn-in) ===
+  else if (command === "complete") {
+    const questData = ensureQuestData(player);
+
+    if (questData.active && questData.active.isEncounter) {
+      questData.progress = questData.active.totalMobCount;
+      PersistenceManager.saveQuestData(player, questData);
+      player.sendMessage(`§aEncounter marked complete - return to board to turn in`);
+    } else {
+      player.sendMessage(`§cNo active encounter quest`);
+    }
+  }
+
+  // === SPAWN: Spawn test encounter at player location ===
+  else if (command === "spawn") {
+    // Import encounter table dynamically
+    import("./data/EncounterTable.js").then(({ ENCOUNTER_TABLE }) => {
+      const testEncounter = ENCOUNTER_TABLE[0];  // skeleton_warband
+      const testQuest = {
+        id: "debug_test",
+        encounterMobs: testEncounter.mobs
+      };
+
+      const entityIds = spawnEncounterMobs(testQuest, player.location, player.dimension);
+      player.sendMessage(`§aSpawned ${entityIds.length} test mobs at your location`);
+    }).catch(error => {
+      player.sendMessage(`§cFailed to spawn test encounter: ${error.message}`);
+      console.error("[Encounter] Spawn test failed:", error);
+    });
+  }
+
+  // === DESPAWN: Despawn test encounter mobs ===
+  else if (command === "despawn") {
+    const count = despawnEncounterMobs("debug_test", player.dimension);
+    player.sendMessage(`§aDespawned ${count} test mobs`);
+  }
+
+  // === UNKNOWN COMMAND ===
+  else {
+    player.sendMessage(`§cUnknown encounter command: ${command}`);
+    player.sendMessage(`§7Available: info, count, complete, spawn, despawn`);
   }
 });
 

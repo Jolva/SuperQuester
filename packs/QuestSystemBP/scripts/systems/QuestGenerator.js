@@ -42,6 +42,9 @@
 
 import { MOB_POOL, ITEM_POOL, LORE_TEMPLATES } from "../data/QuestData.js";
 import { rollRarity, calculateBaseQuestReward } from "./RewardCalculator.js";
+// === PHASE 1: ENCOUNTER SYSTEM INTEGRATION ===
+// Import encounter quest generator for rare/legendary quests
+import { generateEncounterQuest } from "./EncounterManager.js";
 
 export class QuestGenerator {
   static generateDailyQuests(count = 3) {
@@ -84,6 +87,43 @@ export class QuestGenerator {
 
     // Roll rarity using weighted system from EconomyConfig
     const rarity = rollRarity();
+
+    // ========================================================================
+    // PHASE 1: ENCOUNTER SYSTEM INTEGRATION
+    // ========================================================================
+    // Route Rare and Legendary quests to the encounter system instead of
+    // using standard kill/gather quests. This replaces random mob quests
+    // with curated encounter groups that spawn at ring-based distances.
+    //
+    // IMPACT:
+    // - Rare (22% chance): Now generates encounters instead of kill quests
+    // - Legendary (7% chance): Now generates encounters instead of kill quests
+    // - Common (70%) and Mythic (1%): UNCHANGED, bypass this block entirely
+    //
+    // FALLBACK BEHAVIOR:
+    // If encounter generation fails (shouldn't happen with valid data),
+    // the code falls through to standard quest generation as a safety net.
+    //
+    // PHASE PROGRESSION:
+    // - Phase 1 (CURRENT): Quest generation only, no spawning
+    // - Phase 2+: Mob spawning, persistence, ring distances (future)
+    // ========================================================================
+    if (rarity === "rare" || rarity === "legendary") {
+      const encounterQuest = generateEncounterQuest(rarity);
+
+      if (encounterQuest) {
+        // Encounter quest successfully generated - return it immediately
+        // This quest has all standard fields + encounter-specific fields
+        return encounterQuest;
+      }
+
+      // Fallback: If encounter generation failed, log warning and continue
+      // to standard quest generation below as a safety net
+      console.warn(`[QuestGenerator] Encounter generation failed for ${rarity}, falling back to standard quest`);
+    }
+    // === END ENCOUNTER SYSTEM INTEGRATION ===
+
+    // Continue with original logic for Common/Mythic or fallback
     quest.rarity = rarity;
 
     // Calculate SP reward using new economy system

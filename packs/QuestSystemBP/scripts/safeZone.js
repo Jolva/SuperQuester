@@ -206,6 +206,12 @@ export function registerSafeZoneEvents() {
     // Allow manual spawning by admins/testing
     if (cause === "SpawnEgg" || cause === "Command" || cause === "Override") return;
 
+    // ENCOUNTER SYSTEM EXCEPTION: Allow encounter mobs (they have special tags)
+    // Check for encounter mob tag before removing
+    if (entity.hasTag && entity.hasTag("sq_encounter_mob")) {
+      return; // This is an encounter mob - don't remove it
+    }
+
     if (isHostile(entity.typeId) && isInSafeZone(entity.location)) {
       console.warn(`[SafeZone] Removing unauthorized hostile: ${entity.typeId} (Cause: ${cause})`);
       try {
