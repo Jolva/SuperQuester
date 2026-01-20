@@ -83,16 +83,26 @@ import {
 
 import { COSTS, STREAK_CONFIG } from "./data/EconomyConfig.js";
 
-// === PHASE 2: ENCOUNTER SYSTEM IMPORTS ===
-// Encounter mob spawning, despawning, and tracking utilities
+// === PHASE 3: ENCOUNTER SYSTEM IMPORTS ===
+// Spawner functions (mob management)
 import {
   spawnEncounterMobs,
   despawnEncounterMobs,
-  getTestSpawnLocation,
   isEncounterMob,
   getQuestIdFromMob,
   countRemainingMobs
 } from "./systems/EncounterSpawner.js";
+
+// Location functions (zone selection, terrain validation)
+import {
+  selectEncounterZone,
+  calculateDistance,
+  getQuestBoardPosition,
+  getDirection
+} from "./systems/LocationValidator.js";
+
+// Proximity monitoring (spawn trigger on zone entry)
+import { startProximityMonitoring } from "./systems/EncounterProximity.js";
 
 // =============================================================================
 // CONSTANTS — WORLD LOCATIONS
@@ -191,6 +201,11 @@ world.afterEvents.worldInitialize.subscribe(() => {
   // Initialize SP economy systems
   initializeSPObjective();
   initializeStreakTracking();
+
+  // Phase 3: Start encounter proximity monitoring
+  // This tick-based system detects when players enter encounter zones
+  // and triggers mob spawning when chunks are loaded
+  startProximityMonitoring();
 });
 
 // Load data when player joins AND handle spawn location
@@ -957,40 +972,38 @@ function handleQuestAccept(player, questIndex) {
   data.available[questIndex] = null;  // Mark slot as taken
 
   // ========================================================================
-  // PHASE 2: ENCOUNTER SYSTEM - Spawn Mobs on Quest Accept
+  // PHASE 3: ENCOUNTER SYSTEM - Zone Assignment on Quest Accept
   // ========================================================================
-  // If this is an encounter quest (rare/legendary), spawn the mob group
-  // at a fixed test location (30 blocks from board). Phase 3 will replace
-  // this with ring-based random spawning with terrain validation.
+  // If this is an encounter quest (rare/legendary), assign a zone center
+  // but DO NOT spawn mobs yet. Spawning happens when player enters the zone.
   //
-  // WORKFLOW:
-  // 1. Check if quest is encounter type (has isEncounter flag)
-  // 2. Get test spawn location (Phase 2: fixed at X=102, Y=75, Z=-278)
-  // 3. Spawn all mobs from encounterMobs array
-  // 4. Tag mobs with quest ID for kill tracking
-  // 5. Store spawn data on quest for later cleanup
-  // 6. Notify player that encounter has appeared
+  // TWO-STAGE SPAWN FLOW:
+  // 1. Quest Accept (here): Assign zone center (no terrain validation needed)
+  // 2. Player Arrival: EncounterProximity.js detects zone entry, spawns mobs
   //
-  // IMPORTANT: This spawning happens BEFORE saveQuestData() so that
-  // spawnData is persisted with the quest state.
+  // This solves LocationInUnloadedChunkError - chunks ARE loaded when player
+  // is near the zone, so terrain validation works.
+  //
+  // STATE MACHINE:
+  // - encounterState: "pending" -> "spawned" -> "complete"
+  // - spawnData: null until mobs actually spawn
   // ========================================================================
   if (data.active.isEncounter) {
-    const spawnLocation = getTestSpawnLocation();  // Phase 2: Fixed 30 blocks east
-    const dimension = player.dimension;
+    // Assign encounter zone (random point in tier ring)
+    const zone = selectEncounterZone(data.active.rarity);
+    data.active.encounterZone = zone;
+    data.active.encounterState = "pending";
+    data.active.spawnData = null;
 
-    // Spawn all mobs for this encounter
-    const entityIds = spawnEncounterMobs(data.active, spawnLocation, dimension);
+    // Calculate distance and direction for player notification
+    const boardPos = getQuestBoardPosition();
+    const distance = calculateDistance(boardPos, zone.center);
+    const direction = getDirection(boardPos, zone.center);
 
-    // Store spawn data on the quest for cleanup operations
-    // This gets saved with quest state below
-    data.active.spawnData = {
-      location: spawnLocation,
-      spawnedEntityIds: entityIds,
-      dimensionId: dimension.id
-    };
-
-    // Notify player that encounter has spawned
-    player.sendMessage(`§e${data.active.encounterName} §fhas appeared nearby!`);
+    // Notify player about zone location
+    player.sendMessage(`§e${data.active.encounterName} §fawaits §c~${distance} blocks §fto the §e${direction}§f.`);
+    player.sendMessage(`§7Travel to the area to begin the encounter.`);
+    player.sendMessage(`§7Zone center: ${zone.center.x}, ${zone.center.z}`);
   }
   // === END ENCOUNTER SPAWNING ===
 
@@ -1021,29 +1034,30 @@ function handleQuestAbandon(player) {
   const quest = data.active;
 
   // ========================================================================
-  // PHASE 2: ENCOUNTER SYSTEM - Despawn Mobs on Abandon
+  // PHASE 3: ENCOUNTER SYSTEM - Handle Abandon for Both States
   // ========================================================================
-  // If this is an encounter quest, despawn all mobs and clear spawn data
-  // so the quest can be re-accepted with fresh mob spawns.
+  // If this is an encounter quest, handle based on encounterState:
+  // - "pending": No mobs spawned yet, just reset state
+  // - "spawned": Mobs in world, need to despawn them
   //
   // WORKFLOW:
   // 1. Check if quest is encounter type
-  // 2. Check if spawnData exists (quest was accepted and mobs spawned)
-  // 3. Get dimension from spawn data
-  // 4. Despawn all encounter mobs
-  // 5. Clear spawnData from quest object
-  //
-  // IMPORTANT: Clearing spawnData allows the quest to be re-accepted.
-  // When re-accepted, new mobs will spawn at a potentially different location.
+  // 2. If spawned with spawnData, despawn all mobs
+  // 3. Reset encounterState to "pending" for re-accept
+  // 4. Clear spawnData (zone stays the same if re-accepted)
   // ========================================================================
-  if (quest.isEncounter && quest.spawnData) {
-    const dimension = world.getDimension(quest.spawnData.dimensionId || "overworld");
-    const despawnedCount = despawnEncounterMobs(quest.id, dimension);
+  if (quest.isEncounter) {
+    // Only despawn if mobs were actually spawned
+    if (quest.encounterState === "spawned" && quest.spawnData) {
+      const dimension = world.getDimension(quest.spawnData.dimensionId || "overworld");
+      const despawnedCount = despawnEncounterMobs(quest.id, dimension);
+      console.log(`[Encounter] Abandoned quest ${quest.id}, despawned ${despawnedCount} mobs`);
+    }
 
-    // Clear spawn data so quest can be re-accepted
+    // Reset encounter state for re-accept
+    quest.encounterState = "pending";
     quest.spawnData = null;
-
-    console.log(`[Encounter] Abandoned quest ${quest.id}, despawned ${despawnedCount} mobs`);
+    // Note: encounterZone stays the same if re-accepted from board
   }
   // === END ENCOUNTER DESPAWN ===
 
@@ -1688,6 +1702,7 @@ function handleEntityDeath(ev) {
             player.playSound("quest.progress_tick", { volume: 0.6, pitch: 1.0 });
           } else {
             // All mobs killed - quest complete!
+            questData.active.encounterState = "complete";  // Phase 3: State transition
             player.sendMessage(`§a${questData.active.encounterName}: §6COMPLETE! §7Return to the board.`);
             player.playSound("random.levelup");
             markQuestComplete(player, questData.active);
@@ -1854,7 +1869,17 @@ function handleQuestTurnIn(player) {
       }
     }
   } else if (quest.type === "kill" || quest.type === "mine" || quest.type === "encounter") {
-    if (data.progress < quest.requiredCount) {
+    // Phase 3: For encounters, check encounterState instead of just progress
+    if (quest.isEncounter) {
+      if (quest.encounterState !== "complete") {
+        if (quest.encounterState === "pending") {
+          player.sendMessage(`§cYou haven't found the encounter yet. Travel to the zone.`);
+        } else {
+          player.sendMessage(`§cProgress: ${data.progress}/${quest.requiredCount}§r`);
+        }
+        return;
+      }
+    } else if (data.progress < quest.requiredCount) {
       player.sendMessage(`§cProgress: ${data.progress}/${quest.requiredCount}§r`);
       return;
     }
@@ -2292,6 +2317,95 @@ function wireInteractions() {
             ev.sender.sendMessage(`§cError generating encounter: ${error.message}`);
             console.error("[EncounterTest] Generation failed:", error);
           }
+        });
+      }
+
+      // ========================================================================
+      // PHASE 3 TESTING COMMANDS: Zone & Proximity Debugging
+      // ========================================================================
+      // !encounter zone info - Show current zone details and distance
+      // !encounter tp zone - Teleport to zone center
+      // ========================================================================
+
+      // Show encounter zone information
+      if (ev.message === "!encounter zone info") {
+        ev.cancel = true;
+        system.run(() => {
+          const questData = ensureQuestData(ev.sender);
+
+          if (!questData?.active?.isEncounter) {
+            ev.sender.sendMessage(`§cNo active encounter quest.`);
+            return;
+          }
+
+          const quest = questData.active;
+          const zone = quest.encounterZone;
+
+          ev.sender.sendMessage(`§e=== Encounter Zone Info ===`);
+          ev.sender.sendMessage(`§fName: §e${quest.encounterName}`);
+          ev.sender.sendMessage(`§fState: §7${quest.encounterState}`);
+
+          if (zone) {
+            ev.sender.sendMessage(`§fZone center: §7${zone.center.x}, ${zone.center.z}`);
+            ev.sender.sendMessage(`§fTrigger radius: §7${zone.radius} blocks`);
+
+            const dist = calculateDistance(ev.sender.location, zone.center);
+            ev.sender.sendMessage(`§fYour distance: §e${dist} blocks`);
+
+            if (dist <= zone.radius) {
+              ev.sender.sendMessage(`§aYou are INSIDE the zone!`);
+            } else {
+              ev.sender.sendMessage(`§7${dist - zone.radius} blocks until zone entry`);
+            }
+          } else {
+            ev.sender.sendMessage(`§cNo zone assigned (unexpected)`);
+          }
+
+          if (quest.spawnData) {
+            const loc = quest.spawnData.location;
+            ev.sender.sendMessage(`§fSpawn location: §7${loc.x}, ${loc.y}, ${loc.z}`);
+          }
+        });
+      }
+
+      // Teleport to zone center
+      if (ev.message === "!encounter tp zone") {
+        ev.cancel = true;
+        system.run(() => {
+          const questData = ensureQuestData(ev.sender);
+
+          if (!questData?.active?.isEncounter || !questData.active.encounterZone) {
+            ev.sender.sendMessage(`§cNo active encounter with zone.`);
+            return;
+          }
+
+          const zone = questData.active.encounterZone;
+          // Teleport high to avoid spawning inside terrain
+          ev.sender.teleport({ x: zone.center.x, y: 100, z: zone.center.z });
+          ev.sender.sendMessage(`§aTeleported to zone center (high altitude)`);
+          ev.sender.sendMessage(`§7Zone: ${zone.center.x}, ${zone.center.z}`);
+        });
+      }
+
+      // Teleport to spawn location (if mobs have spawned)
+      if (ev.message === "!encounter tp spawn") {
+        ev.cancel = true;
+        system.run(() => {
+          const questData = ensureQuestData(ev.sender);
+
+          if (!questData?.active?.isEncounter) {
+            ev.sender.sendMessage(`§cNo active encounter quest.`);
+            return;
+          }
+
+          if (!questData.active.spawnData || !questData.active.spawnData.location) {
+            ev.sender.sendMessage(`§cMobs haven't spawned yet. Travel to the zone first.`);
+            return;
+          }
+
+          const loc = questData.active.spawnData.location;
+          ev.sender.teleport({ x: loc.x, y: loc.y + 1, z: loc.z });
+          ev.sender.sendMessage(`§aTeleported to spawn location: ${loc.x}, ${loc.y}, ${loc.z}`);
         });
       }
     });

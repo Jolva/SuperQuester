@@ -10,10 +10,10 @@
  * and cleanup operations.
  *
  * CRITICAL CONTEXT:
- * - Part of Encounter System Phase 2 (mob spawning implementation)
+ * - Part of Encounter System Phase 3 (proximity-based spawning)
  * - Phase 1 created quest generation only (no spawning)
- * - Phase 2 adds spawning at FIXED test location (30 blocks from board)
- * - Phase 3 will replace test location with ring-based random spawning
+ * - Phase 2 added spawning at fixed test location (now removed)
+ * - Phase 3 uses two-stage flow: zone assignment → proximity spawn trigger
  * - Phase 4 will add logout/login persistence (despawn/respawn)
  *
  * TAGGING SYSTEM:
@@ -27,11 +27,11 @@
  * - Cleanup operations (despawn all mobs for a specific quest)
  * - Kill attribution (increment progress for correct quest owner)
  *
- * SPAWN MECHANICS (PHASE 2):
- * - Test location: 30 blocks east of quest board (X=102, Y=75, Z=-278)
+ * SPAWN MECHANICS (PHASE 3):
+ * - Location determined by EncounterProximity.js when player enters zone
+ * - Terrain validation via LocationValidator.js (40-60 blocks from player)
  * - Variance: ±3 blocks X/Z to prevent mob stacking
- * - No terrain validation yet (Phase 3 will add this)
- * - Spawns synchronously when quest is accepted
+ * - Spawns asynchronously with 1-second chunk loading delay
  *
  * KILL ATTRIBUTION MODEL:
  * Phase 2 uses simple "any death counts" model:
@@ -66,19 +66,11 @@ import { world, system } from "@minecraft/server";
 // CONSTANTS
 // ============================================================================
 
-/**
- * Quest board location (center of spawn calculations)
- * This is the physical location of the quest board block in the world.
- */
-const QUEST_BOARD_POS = { x: 72, y: 75, z: -278 };
-
-/**
- * Test spawn location (PHASE 2 ONLY)
- * Phase 3 will replace this with ring-based random spawning.
- * Location: Right at quest board (1 block east)
- * Distance from board: 1 block east
- */
-const TEST_SPAWN_LOCATION = { x: 73, y: 75, z: -278 };
+// ============================================================================
+// PHASE 3: Test location constants removed
+// Zone selection now handled by LocationValidator.js
+// Spawn triggering now handled by EncounterProximity.js
+// ============================================================================
 
 /**
  * Tag applied to ALL encounter mobs for universal filtering
@@ -90,29 +82,6 @@ const TAG_ENCOUNTER_MOB = "sq_encounter_mob";
  * Full tag format: "sq_quest_<questId>"
  */
 const TAG_QUEST_PREFIX = "sq_quest_";
-
-// ============================================================================
-// SPAWN LOCATION (PHASE 2 - TEST LOCATION)
-// ============================================================================
-
-/**
- * Get the test spawn location for Phase 2
- *
- * IMPORTANT: This is a TEMPORARY function for Phase 2 testing.
- * Phase 3 will replace this with findValidSpawnLocation() which:
- * - Calculates ring-based random positions (60-200 blocks from board)
- * - Validates terrain (no water, lava, leaves)
- * - Falls back to pre-defined safe coordinates
- *
- * @returns {{x: number, y: number, z: number}} Spawn center point
- *
- * @example
- * const location = getTestSpawnLocation();
- * // Returns: { x: 73, y: 75, z: -278 }
- */
-export function getTestSpawnLocation() {
-  return TEST_SPAWN_LOCATION;
-}
 
 // ============================================================================
 // MOB SPAWNING
