@@ -10,11 +10,11 @@
  * and cleanup operations.
  *
  * CRITICAL CONTEXT:
- * - Part of Encounter System Phase 3 (proximity-based spawning)
- * - Phase 1 created quest generation only (no spawning)
- * - Phase 2 added spawning at fixed test location (now removed)
- * - Phase 3 uses two-stage flow: zone assignment → proximity spawn trigger
- * - Phase 4 will add logout/login persistence (despawn/respawn)
+ * - Part of Encounter System (Phases 1-4 complete)
+ * - Phase 1: Quest generation only (no spawning)
+ * - Phase 2: Spawning at fixed test location (removed)
+ * - Phase 3: Two-stage flow: zone assignment → proximity spawn trigger
+ * - Phase 4: Logout/login persistence (despawn/respawn) ✅ COMPLETE
  *
  * TAGGING SYSTEM:
  * Every encounter mob gets TWO tags:
@@ -27,35 +27,38 @@
  * - Cleanup operations (despawn all mobs for a specific quest)
  * - Kill attribution (increment progress for correct quest owner)
  *
- * SPAWN MECHANICS (PHASE 3):
+ * SPAWN MECHANICS:
  * - Location determined by EncounterProximity.js when player enters zone
- * - Terrain validation via LocationValidator.js (40-60 blocks from player)
+ * - Terrain validation via LocationValidator.js (18-22 blocks from player)
  * - Variance: ±3 blocks X/Z to prevent mob stacking
- * - Spawns asynchronously with 1-second chunk loading delay
+ * - Fire protection: Undead mobs don't burn in sunlight
  *
  * KILL ATTRIBUTION MODEL:
- * Phase 2 uses simple "any death counts" model:
  * - Quest owner kills mob ✅
  * - Other player kills mob ✅
- * - Environmental damage (lava, fall) ✅
- * - Mob-on-mob damage ✅
+ * - Environmental damage (lava, fall, drowning) ✅
+ * - Fire/sunlight damage ❌ (blocked by protection system)
  * - Natural despawn ❌ (no entityDie event)
  *
  * DESPAWN TRIGGERS:
  * - Quest turn-in (cleanup remaining mobs)
  * - Quest abandon (remove all mobs, allow re-accept)
- * - Phase 4 will add: Logout (temporary despawn)
+ * - Player logout (temporary despawn, respawn on login)
  * - Phase 5 will add: Server restart cleanup (orphan removal)
  *
+ * PROTECTION SYSTEM:
+ * - initializeEncounterMobProtection() blocks fire damage for tagged mobs
+ * - Other environmental damage (drowning, lava, fall) goes through
+ * - This prevents undead burning but allows stuck mobs to die naturally
+ *
  * DEPENDENCIES:
- * - Used by: main.js (handleQuestAccept, entityDie, handleQuestTurnIn, handleQuestAbandon)
- * - Imports: @minecraft/server (world, dimension, entity APIs)
+ * - Used by: main.js (playerSpawn, playerLeave, entityDie, turn-in, abandon)
+ * - Imports: @minecraft/server (world, system)
  *
  * MODIFICATION GUIDELINES:
  * - Always use try/catch around entity operations (entities may be removed)
  * - Log all spawn/despawn operations for debugging
- * - Maintain backward compatibility with Phase 1 quest schema
- * - Test location constants can be modified for different worlds
+ * - Maintain backward compatibility with quest schema
  *
  * ============================================================================
  */
