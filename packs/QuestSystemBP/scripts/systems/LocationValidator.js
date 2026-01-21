@@ -54,6 +54,10 @@ const RING_CONFIG = {
   legendary: {
     innerRadius: 100,
     outerRadius: 200
+  },
+  mythic: {
+    innerRadius: 120,
+    outerRadius: 220
   }
 };
 
@@ -124,6 +128,11 @@ const FALLBACK_LOCATIONS = {
     { x: 220, y: 63, z: -319 },  // ~152 blocks from board
     { x: 239, y: 63, z: -258 },  // ~168 blocks from board
     { x: 156, y: 63, z: -117 }   // ~183 blocks from board
+  ],
+  mythic: [
+    { x: 250, y: 63, z: -350 },  // ~195 blocks from board
+    { x: 270, y: 63, z: -240 },  // ~202 blocks from board
+    { x: 180, y: 63, z: -90 }    // ~215 blocks from board
   ]
 };
 

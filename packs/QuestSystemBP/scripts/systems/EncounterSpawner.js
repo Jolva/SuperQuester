@@ -75,6 +75,7 @@ import { PersistenceManager } from "./PersistenceManager.js";
 /**
  * Mob types that burn in sunlight and need fire resistance
  * Note: minecraft:husk is immune to sunlight and does not need protection
+ * Note: minecraft:wither_skeleton included as precaution (may be immune but no harm)
  */
 const SUNLIGHT_SENSITIVE_MOBS = [
   "minecraft:skeleton",
@@ -82,7 +83,8 @@ const SUNLIGHT_SENSITIVE_MOBS = [
   "minecraft:zombie",
   "minecraft:zombie_villager",
   "minecraft:phantom",
-  "minecraft:drowned"
+  "minecraft:drowned",
+  "minecraft:wither_skeleton"
 ];
 
 // ============================================================================

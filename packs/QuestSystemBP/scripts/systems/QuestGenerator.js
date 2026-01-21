@@ -98,7 +98,8 @@ export class QuestGenerator {
     // IMPACT:
     // - Rare (22% chance): Now generates encounters instead of kill quests
     // - Legendary (7% chance): Now generates encounters instead of kill quests
-    // - Common (70%) and Mythic (1%): UNCHANGED, bypass this block entirely
+    // - Mythic (1% chance): Now generates encounters instead of kill quests
+    // - Common (70%): UNCHANGED, bypass this block entirely
     //
     // FALLBACK BEHAVIOR:
     // If encounter generation fails (shouldn't happen with valid data),
@@ -108,7 +109,7 @@ export class QuestGenerator {
     // - Phase 1 (CURRENT): Quest generation only, no spawning
     // - Phase 2+: Mob spawning, persistence, ring distances (future)
     // ========================================================================
-    if (rarity === "rare" || rarity === "legendary") {
+    if (rarity === "rare" || rarity === "legendary" || rarity === "mythic") {
       const encounterQuest = generateEncounterQuest(rarity);
 
       if (encounterQuest) {

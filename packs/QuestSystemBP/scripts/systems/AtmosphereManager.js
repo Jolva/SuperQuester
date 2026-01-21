@@ -76,9 +76,9 @@ export class AtmosphereManager {
 
         // --- AUDIO (Distance-based volume falloff) ---
         // Full volume at <1 block, 10% quieter per block away
-        const MAX_VOLUME = 1.05;
+        const MAX_VOLUME = 0.25;
         const FALLOFF_RATE = 0.10;
-        const MIN_VOLUME = 0.1;
+        const MIN_VOLUME = 0.025;
 
         const volumeMultiplier = Math.max(MIN_VOLUME, 1 - (dist * FALLOFF_RATE));
         const currentVolume = MAX_VOLUME * volumeMultiplier;

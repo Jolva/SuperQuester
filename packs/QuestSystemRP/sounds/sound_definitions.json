@@ -187,7 +187,7 @@
       "sounds": [
         {
           "name": "sounds/atmosphere/dogs_01",
-          "volume": 0.25,
+          "volume": 0.06,
           "load_on_low_memory": true
         }
       ]
@@ -197,7 +197,7 @@
       "sounds": [
         {
           "name": "sounds/atmosphere/dogs_02",
-          "volume": 0.25,
+          "volume": 0.06,
           "load_on_low_memory": true
         }
       ]
@@ -207,7 +207,7 @@
       "sounds": [
         {
           "name": "sounds/atmosphere/dog_03",
-          "volume": 0.25,
+          "volume": 0.06,
           "load_on_low_memory": true
         }
       ]
@@ -217,7 +217,7 @@
       "sounds": [
         {
           "name": "sounds/atmosphere/monkeys_01",
-          "volume": 0.25,
+          "volume": 0.06,
           "load_on_low_memory": true
         }
       ]
