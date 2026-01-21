@@ -293,7 +293,7 @@ function checkPlayerProximity(player) {
 
     // Spawn beacon if close enough (Phase 5)
     if (distance <= BEACON_ACTIVATION_DISTANCE && beaconTickCounter === 0) {
-      spawnBeaconParticles(dimension, spawnLoc);
+      spawnBeaconParticles(player.dimension, spawnLoc);
     }
 
     return; // Don't check for zone entry if already spawned

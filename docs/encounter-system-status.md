@@ -46,9 +46,11 @@ pending → spawned → complete
 |---------------|----------------------|--------|
 | 40-60 blocks from player | 18-22 blocks from player | Mobs were dying instantly at 40-60 blocks due to chunk loading edge cases |
 
-### Fire Protection Added (Not in Original Spec)
+### Sunlight Protection Added (Not in Original Spec)
 - **Problem:** Undead mobs (zombies, skeletons, phantoms) burned in sunlight immediately after spawning
-- **Solution:** Added `initializeEncounterMobProtection()` that blocks fire/sunlight damage for encounter mobs
+- **Solution:** Two-layer protection:
+  1. **Primary:** Fire resistance effect applied to undead mobs on spawn (1 hour duration)
+  2. **Backup:** `initializeEncounterMobProtection()` blocks fire damage for tagged mobs via damage event
 - **Design Decision:** Only fire damage is blocked - drowning, lava, fall damage still work so mobs don't get permanently stuck
 
 ### UI Simplified
@@ -255,7 +257,7 @@ All commands use `!encounter` prefix:
 
 1. **Sky beacon not working** - The particle beacon never appears. Likely a bug in `spawnBeaconParticles()` - possibly `dimension` variable not in scope, particle type invalid, or chunk loading issue.
 
-2. **Undead mobs still burn in sunlight** - Despite fire protection being in place, skeletons and other undead mobs still take sunlight damage. Fire protection only blocks `fire` and `fire_tick` damage causes, but sunlight burning may use a different damage cause.
+2. **~~Undead mobs still burn in sunlight~~** - FIXED: Undead mobs now receive fire resistance effect on spawn, which reliably prevents sunlight burning. The damage event blocker remains as a backup.
 
 3. **Witch Coven spawns zombie villagers that burn** - Zombie villagers are sunlight-sensitive but not in our protection list (witches throw potions that spawn them, those aren't tagged)
 

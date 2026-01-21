@@ -32,7 +32,7 @@
  * - Location determined by EncounterProximity.js when player enters zone
  * - Terrain validation via LocationValidator.js (18-22 blocks from player)
  * - Variance: ±3 blocks X/Z to prevent mob stacking
- * - Fire protection: Undead mobs don't burn in sunlight
+ * - Sunlight protection: Undead mobs get fire resistance effect on spawn
  *
  * KILL ATTRIBUTION MODEL:
  * - Quest owner kills mob ✅
@@ -48,7 +48,8 @@
  * - Server restart: cleanupOrphanedMobs() removes orphaned mobs (Phase 5)
  *
  * PROTECTION SYSTEM:
- * - initializeEncounterMobProtection() blocks fire damage for tagged mobs
+ * - Primary: Fire resistance effect applied to undead mobs on spawn
+ * - Backup: initializeEncounterMobProtection() blocks fire damage for tagged mobs
  * - Other environmental damage (drowning, lava, fall) goes through
  * - This prevents undead burning but allows stuck mobs to die naturally
  *
@@ -64,8 +65,25 @@
  * ============================================================================
  */
 
-import { world, system } from "@minecraft/server";
+import { world, system, EffectTypes } from "@minecraft/server";
 import { PersistenceManager } from "./PersistenceManager.js";
+
+// ============================================================================
+// UNDEAD MOB PROTECTION
+// ============================================================================
+
+/**
+ * Mob types that burn in sunlight and need fire resistance
+ * Note: minecraft:husk is immune to sunlight and does not need protection
+ */
+const SUNLIGHT_SENSITIVE_MOBS = [
+  "minecraft:skeleton",
+  "minecraft:stray",
+  "minecraft:zombie",
+  "minecraft:zombie_villager",
+  "minecraft:phantom",
+  "minecraft:drowned"
+];
 
 // ============================================================================
 // CONSTANTS
@@ -134,7 +152,7 @@ export function initializeEncounterMobProtection() {
       return; // Entity invalid
     }
 
-    // Only block fire/sunlight damage - let other environmental damage through
+    // Block fire damage as backup protection (primary is fire resistance effect)
     const cause = ev.damageSource?.cause;
     if (cause && BLOCKED_DAMAGE_CAUSES.includes(cause)) {
       ev.cancel = true;
@@ -143,6 +161,31 @@ export function initializeEncounterMobProtection() {
 
   damageProtectionInitialized = true;
   console.log("[EncounterSpawner] Encounter mob fire protection initialized");
+}
+
+/**
+ * Apply fire resistance effect to sunlight-sensitive mobs
+ * This is the primary protection - prevents undead from burning in sunlight
+ *
+ * Duration: Very long (1 hour = 72000 ticks) to last entire encounter
+ * Amplifier: 0 (level 1 is sufficient)
+ * ShowParticles: false (don't clutter visuals)
+ *
+ * @param {Entity} entity - The mob entity to protect
+ */
+function applyFireResistance(entity) {
+  if (!SUNLIGHT_SENSITIVE_MOBS.includes(entity.typeId)) return;
+
+  try {
+    // Fire Resistance effect duration: 1 hour (72000 ticks = 3600 seconds)
+    // This is effectively permanent for encounter duration
+    entity.addEffect("fire_resistance", 72000, {
+      amplifier: 0,
+      showParticles: false
+    });
+  } catch (error) {
+    console.warn(`[EncounterSpawner] Failed to apply fire resistance to ${entity.typeId}: ${error}`);
+  }
 }
 
 // ============================================================================
@@ -223,6 +266,9 @@ export function spawnEncounterMobs(quest, location, dimension) {
 
         // Apply quest-specific tag for tracking
         entity.addTag(`${TAG_QUEST_PREFIX}${quest.id}`);
+
+        // Apply fire resistance to undead mobs (prevents sunlight burning)
+        applyFireResistance(entity);
 
         // Apply custom name tag if defined (e.g., "Frost Archer" for strays)
         if (mobGroup.nameTag) {
@@ -380,6 +426,9 @@ export function respawnRemainingMobs(quest, progress, dimension) {
 
         entity.addTag(TAG_ENCOUNTER_MOB);
         entity.addTag(`${TAG_QUEST_PREFIX}${quest.id}`);
+
+        // Apply fire resistance to undead mobs (prevents sunlight burning)
+        applyFireResistance(entity);
 
         if (mobGroup.nameTag) {
           entity.nameTag = mobGroup.nameTag;
