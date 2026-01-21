@@ -51,7 +51,7 @@
  */
 
 import { world, system, ItemStack, DisplaySlotId } from "@minecraft/server";
-import { ActionFormData, MessageFormData } from "@minecraft/server-ui";
+import { ActionFormData } from "@minecraft/server-ui";
 import { getMobType } from "./quests/mobTypes.js";
 import { registerSafeZoneEvents, handleSafeZoneCommand } from "./safeZone.js";
 import { PersistenceManager } from "./systems/PersistenceManager.js";
@@ -1404,7 +1404,7 @@ async function showQuestDetails(player, questIndex, isStandalone = false) {
 
   const colors = getQuestColors(def.rarity);
 
-  const form = new MessageFormData()
+  const form = new ActionFormData()
     .title("Quest Contract")
     .body(
       `${colors.chat}${def.title}§r` +
@@ -1416,21 +1416,24 @@ async function showQuestDetails(player, questIndex, isStandalone = false) {
       `\n\n§eREWARDS:§r` +
       rewardsStr
     )
-    .button1("§lACCEPT CONTRACT§r")
-    .button2("Decline");
+    .button("§a§lACCEPT CONTRACT§r", "textures/quest_ui/icon_complete")
+    .button("§7Decline", "textures/quest_ui/icon_alert");
 
   const res = await form.show(player);
 
+  if (res.canceled) {
+    await showQuestBoard(player, BOARD_TABS.AVAILABLE, isStandalone, false);
+    return;
+  }
+
   if (res.selection === 0) {
-    // Accept (Button 1 -> Index 0)
+    // Accept
     await handleUiAction(player, { type: "accept", questIndex, fromStandalone: isStandalone });
     return;
   }
 
-  // Decline or Cancel
-  if (res.canceled || res.selection === 1) {
-    await showQuestBoard(player, BOARD_TABS.AVAILABLE, isStandalone, false);
-  }
+  // Decline (selection === 1)
+  await showQuestBoard(player, BOARD_TABS.AVAILABLE, isStandalone, false);
 }
 
 async function showManageQuest(player, isStandalone = false) {
@@ -1443,23 +1446,22 @@ async function showManageQuest(player, isStandalone = false) {
   const quest = data.active;
   const colors = getQuestColors(quest.rarity);
 
-  const form = new MessageFormData()
+  const form = new ActionFormData()
     .title("§cAbandon Quest?")
     .body(`Are you sure you want to abandon:\n${colors.chat}${quest.title}§r\n\nProgress will be lost and it will return to available quests.`)
-    .button1("Yes, Abandon")
-    .button2("No, Keep");
+    .button("§c§lYes, Abandon", "textures/quest_ui/button_abandon")
+    .button("§aNo, Keep", "textures/quest_ui/icon_complete");
 
   const res = await form.show(player);
-  // Button 1 ("Yes") -> 0
-  // Button 2 ("No") -> 1
 
   if (res.canceled || res.selection === 1) {
-    // Button 2 (No) -> 1, or Canceled
+    // "No, Keep" or canceled
     await showQuestBoard(player, BOARD_TABS.ACTIVE, isStandalone, false);
     return;
   }
 
   if (res.selection === 0) {
+    // "Yes, Abandon"
     const removed = handleQuestAbandon(player);
     if (removed) {
       const c = getQuestColors(removed.rarity);
@@ -2072,11 +2074,11 @@ function showTutorialPage(player, topic) {
   const page = tutorials[topic];
   if (!page) return;
 
-  const msg = new MessageFormData()
+  const msg = new ActionFormData()
     .title(page.title)
     .body(page.body)
-    .button1("§aBack to Atlas")
-    .button2("§7Close");
+    .button("§aBack to Atlas", "textures/quest_ui/icon_crown")
+    .button("§7Close");
 
   msg.show(player).then((response) => {
     if (response.selection === 0) {

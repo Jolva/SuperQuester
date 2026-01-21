@@ -13,6 +13,8 @@
   "_comment_lesson5": "5. The 'nineslice_size' value should be ~12-16% of the texture size for good corner preservation.",
   "_comment_lesson6": "6. Button hover/pressed states use 'color' multiplier: >1.0 = brighter, <1.0 = darker.",
   "_comment_lesson7": "7. Do NOT extend common_buttons.light_text_button if you need custom background textures - it won't apply them.",
+  "_comment_lesson8": "8. This override ONLY affects ActionFormData buttons. MessageFormData uses a separate hardcoded UI path.",
+  "_comment_lesson9": "9. To style MessageFormData dialogs, convert them to ActionFormData in your scripts instead.",
   "_comment_textures_section": "=== TEXTURE PATH ===",
   "_comment_texture_path": "Textures are located at: packs/QuestSystemRP/textures/quest_ui/",
   "_comment_button_section": "=== CUSTOM BUTTON DEFINITION ===",
@@ -194,10 +196,7 @@
     ]
   },
   "_comment_future_section": "=== FUTURE ENHANCEMENTS ===",
-  "_comment_future1": "To add rarity-based button textures (legendary, rare, epic):",
-  "_comment_future2": "1. Create texture files: quest_button_legendary.png, quest_button_rare.png, etc.",
-  "_comment_future3": "2. Create new content panels like quest_button_content_legendary_default, etc.",
-  "_comment_future4": "3. Create new button types like quest_form_button_legendary that use those content panels.",
-  "_comment_future5": "4. Modify the form generation in main.js to pass a rarity indicator.",
-  "_comment_future6": "5. Use bindings or separate button factories to select the right button based on rarity."
+  "_comment_future1": "To add a pressed state texture: Create quest_button_common_pressed.png and update the pressed control.",
+  "_comment_future2": "To add rarity-based button textures: Would require dynamic texture selection via bindings (complex).",
+  "_comment_future3": "Note: JSON UI is being deprecated in favor of Ore UI. These customizations may break in future versions."
 }
