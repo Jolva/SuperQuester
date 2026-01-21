@@ -25,7 +25,7 @@
  * 7. Update quest state to "spawned"
  *
  * NAVIGATION SYSTEM (Phase 5):
- * - Directional arrow (↑↗→↘↓↙←↖) relative to player facing
+ * - Directional arrow (16-direction custom glyphs) relative to player facing
  * - Sky beacon particle column when within 150 blocks
  * - Beacon pulses every 2 seconds (40 ticks)
  *
@@ -58,27 +58,36 @@ import {
 
 /**
  * Check interval in ticks (20 ticks = 1 second)
- * Balance between responsiveness and performance
+ * Set to 2 ticks (10 updates/second) for fluid arrow navigation
  */
-const CHECK_INTERVAL_TICKS = 20;
+const CHECK_INTERVAL_TICKS = 2;
 
 // ============================================================================
 // NAVIGATION CONSTANTS (Phase 5)
 // ============================================================================
 
 /**
- * Arrow characters for 8 directions
- * Used to show player which way to go relative to their facing direction
+ * Arrow glyphs for 16 directions (22.5° increments)
+ * Maps to glyph_E1.png spritesheet in resource pack
+ * Unicode Private Use Area: E100-E10F
  */
 const DIRECTION_ARROWS = {
-  N:  "↑",
-  NE: "↗",
-  E:  "→",
-  SE: "↘",
-  S:  "↓",
-  SW: "↙",
-  W:  "←",
-  NW: "↖"
+  N:   "\uE100",  // 0° - ahead
+  NNE: "\uE101",  // 22.5°
+  NE:  "\uE102",  // 45°
+  ENE: "\uE103",  // 67.5°
+  E:   "\uE104",  // 90° - right
+  ESE: "\uE105",  // 112.5°
+  SE:  "\uE106",  // 135°
+  SSE: "\uE107",  // 157.5°
+  S:   "\uE108",  // 180° - behind
+  SSW: "\uE109",  // 202.5° / -157.5°
+  SW:  "\uE10A",  // 225° / -135°
+  WSW: "\uE10B",  // 247.5° / -112.5°
+  W:   "\uE10C",  // 270° / -90° - left
+  WNW: "\uE10D",  // 292.5° / -67.5°
+  NW:  "\uE10E",  // 315° / -45°
+  NNW: "\uE10F"   // 337.5° / -22.5°
 };
 
 /**
@@ -137,16 +146,24 @@ function getDirectionArrow(player, target) {
   while (relativeAngle > 180) relativeAngle -= 360;
   while (relativeAngle < -180) relativeAngle += 360;
 
-  // Convert to 8-direction arrow
-  // 0° = ahead (↑), 90° = right (→), -90° = left (←), 180° = behind (↓)
-  if (relativeAngle >= -22.5 && relativeAngle < 22.5) return DIRECTION_ARROWS.N;    // ahead
-  if (relativeAngle >= 22.5 && relativeAngle < 67.5) return DIRECTION_ARROWS.NE;   // ahead-right
-  if (relativeAngle >= 67.5 && relativeAngle < 112.5) return DIRECTION_ARROWS.E;   // right
-  if (relativeAngle >= 112.5 && relativeAngle < 157.5) return DIRECTION_ARROWS.SE; // behind-right
-  if (relativeAngle >= 157.5 || relativeAngle < -157.5) return DIRECTION_ARROWS.S; // behind
-  if (relativeAngle >= -157.5 && relativeAngle < -112.5) return DIRECTION_ARROWS.SW; // behind-left
-  if (relativeAngle >= -112.5 && relativeAngle < -67.5) return DIRECTION_ARROWS.W;  // left
-  if (relativeAngle >= -67.5 && relativeAngle < -22.5) return DIRECTION_ARROWS.NW;  // ahead-left
+  // Convert to 16-direction arrow (22.5° per direction, ±11.25° boundaries)
+  // 0° = ahead (N), 90° = right (E), -90° = left (W), 180° = behind (S)
+  if (relativeAngle >= -11.25 && relativeAngle < 11.25) return DIRECTION_ARROWS.N;
+  if (relativeAngle >= 11.25 && relativeAngle < 33.75) return DIRECTION_ARROWS.NNE;
+  if (relativeAngle >= 33.75 && relativeAngle < 56.25) return DIRECTION_ARROWS.NE;
+  if (relativeAngle >= 56.25 && relativeAngle < 78.75) return DIRECTION_ARROWS.ENE;
+  if (relativeAngle >= 78.75 && relativeAngle < 101.25) return DIRECTION_ARROWS.E;
+  if (relativeAngle >= 101.25 && relativeAngle < 123.75) return DIRECTION_ARROWS.ESE;
+  if (relativeAngle >= 123.75 && relativeAngle < 146.25) return DIRECTION_ARROWS.SE;
+  if (relativeAngle >= 146.25 && relativeAngle < 168.75) return DIRECTION_ARROWS.SSE;
+  if (relativeAngle >= 168.75 || relativeAngle < -168.75) return DIRECTION_ARROWS.S;
+  if (relativeAngle >= -168.75 && relativeAngle < -146.25) return DIRECTION_ARROWS.SSW;
+  if (relativeAngle >= -146.25 && relativeAngle < -123.75) return DIRECTION_ARROWS.SW;
+  if (relativeAngle >= -123.75 && relativeAngle < -101.25) return DIRECTION_ARROWS.WSW;
+  if (relativeAngle >= -101.25 && relativeAngle < -78.75) return DIRECTION_ARROWS.W;
+  if (relativeAngle >= -78.75 && relativeAngle < -56.25) return DIRECTION_ARROWS.WNW;
+  if (relativeAngle >= -56.25 && relativeAngle < -33.75) return DIRECTION_ARROWS.NW;
+  if (relativeAngle >= -33.75 && relativeAngle < -11.25) return DIRECTION_ARROWS.NNW;
 
   return DIRECTION_ARROWS.N;  // Fallback
 }
