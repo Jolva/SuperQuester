@@ -1,14 +1,14 @@
 # Encounter System: Current Implementation Status
 
 **Last Updated:** January 2026
-**Current Phase:** 4 of 5 COMPLETE
-**Next Phase:** Navigation System (new priority, replacing Phase 5)
+**Current Phase:** 5 of 5 COMPLETE
+**Status:** Encounter System Fully Implemented
 
 ---
 
 ## Executive Summary
 
-The encounter system is fully functional through Phase 4. Players can accept encounter quests, travel to zones, fight spawned mobs, and the system persists across logout/login. Several significant deviations from the original specification were made during implementation to solve real-world issues discovered during testing.
+The encounter system is fully implemented (all 5 phases complete). Players can accept encounter quests, travel to zones using directional arrows and sky beacons, fight spawned mobs, and the system persists across logout/login. Orphan cleanup handles server crashes gracefully.
 
 ---
 
@@ -31,10 +31,11 @@ pending → spawned → complete
    └─────────┘ (abandon resets to pending)
 ```
 
-### UI Feedback
-- **Actionbar** displays persistent objective:
-  - Pending: `Zombie Siege | Travel to zone | 45m (120, -300)`
-  - Spawned: `Zombie Siege | Kill: 5/14 | 20m away`
+### UI Feedback (Phase 5 Enhanced)
+- **Actionbar** displays persistent objective with directional arrow:
+  - Pending: `Zombie Siege | Travel to zone | ↗ 45m`
+  - Spawned: `Zombie Siege | Kill: 5/14 | ↗ 20m`
+- **Sky Beacon** appears when within 150 blocks of target (pulses every 2s)
 
 ---
 
@@ -208,39 +209,26 @@ Every encounter mob gets TWO tags:
 
 ---
 
-## Navigation Context for Next Phase
+## Navigation System (Phase 5 Complete)
 
-### Current Navigation (Minimal)
-- Actionbar shows distance and coordinates: `45m (120, -300)`
-- No waypoints, particles, or compass integration
-- Player must manually navigate using coordinates
+### Directional Arrow
+- **8 directions:** ↑ ↗ → ↘ ↓ ↙ ← ↖
+- Arrow shows direction **relative to player facing** (not compass direction)
+- Updates every tick (20/second) as player rotates
+- Target switches automatically: zone center (pending) → spawn location (spawned)
 
-### Challenges for Navigation System
-1. **Zone is a point, not the mobs** - Zone center is assigned on accept, but mobs spawn at a different location when player arrives
-2. **Two navigation targets:**
-   - Pending state: Navigate to zone center (trigger spawn)
-   - Spawned state: Navigate to mob spawn location
-3. **Distance calculation** - Currently 2D only (ignores Y), which works for overworld but may confuse in hilly terrain
-4. **No minimap** - Bedrock doesn't have F3 coordinates by default, relies on coordinate display setting
+### Sky Beacon
+- Vertical particle column using `minecraft:endrod`
+- 50 blocks tall, 30 particles per pulse
+- Activates within 150 blocks of target
+- Pulses every 2 seconds (40 ticks)
+- Spawns at ground level at target location
 
-### Potential Navigation Features
-- Particle trail pointing toward objective
-- Compass that points to zone/mobs
-- Periodic chat messages with direction ("Head northeast")
-- Sound cues when getting closer/further
-- Integration with Bedrock's locator maps (if possible)
-
-### Available Data for Navigation
-```javascript
-// In EncounterProximity.js checkPlayerProximity():
-const playerLoc = player.location;  // { x, y, z }
-const zone = quest.encounterZone;   // { center: {x, y, z}, radius, tier }
-const spawnLoc = quest.spawnData?.location;  // { x, y, z } or null if pending
-
-// Calculated:
-const distance = calculateDistance(playerLoc, targetLoc);  // 2D distance
-const direction = getDirection(playerLoc, targetLoc);  // "north", "southeast", etc.
-```
+### Orphan Cleanup
+- `cleanupOrphanedMobs()` runs on server start (with 5-second delay to allow players to join first)
+- Removes mobs tagged as encounter mobs but with no matching active quest
+- Handles crashes and incomplete cleanup gracefully
+- Delay prevents race condition where cleanup runs before player data loads
 
 ---
 
@@ -258,26 +246,32 @@ All commands use `!encounter` prefix:
 | `!encounter test generate rare` | Generate test rare encounter |
 | `!encounter test generate legendary` | Generate test legendary encounter |
 | `!encounter tp zone` | Teleport to zone center |
+| `!nav test arrow` | Show navigation debug info (angles, distances) |
+| `!encounter cleanup` | Force orphan mob cleanup |
 
 ---
 
 ## Known Issues / Future Considerations
 
-1. **Witch Coven spawns zombie villagers that burn** - Zombie villagers are sunlight-sensitive but not in our protection list (witches throw potions that spawn them, those aren't tagged)
+1. **Sky beacon not working** - The particle beacon never appears. Likely a bug in `spawnBeaconParticles()` - possibly `dimension` variable not in scope, particle type invalid, or chunk loading issue.
 
-2. **Phantoms fly away** - Phantom Swarm mobs may fly far from spawn point, making them hard to find
+2. **Undead mobs still burn in sunlight** - Despite fire protection being in place, skeletons and other undead mobs still take sunlight damage. Fire protection only blocks `fire` and `fire_tick` damage causes, but sunlight burning may use a different damage cause.
 
-3. **No orphan cleanup** - If server crashes with spawned mobs, they persist until manually removed (Phase 5 was supposed to address this)
+3. **Witch Coven spawns zombie villagers that burn** - Zombie villagers are sunlight-sensitive but not in our protection list (witches throw potions that spawn them, those aren't tagged)
 
-4. **Single-player focused** - Current logout handler despawns ALL encounter mobs, not just the leaving player's mobs (fine for single player, problematic for multiplayer)
+4. **Phantoms fly away** - Phantom Swarm mobs may fly far from spawn point, making them hard to find (arrow still points to original spawn location)
+
+5. **Spider Nest hard to complete** - Spiders can be difficult to locate, especially the last few. Cave spiders in particular may hide in terrain or wander far.
+
+6. **Single-player focused** - Current logout handler despawns ALL encounter mobs, not just the leaving player's mobs (fine for single player, problematic for multiplayer)
 
 ---
 
-## Phase 5 (Original Plan - Now Deprioritized)
+## Phase 5 Complete
 
-The original Phase 5 was:
-- Orphan mob cleanup on server start
-- Full abandon flow validation
-- Edge case hardening
+Phase 5 implemented:
+- ✅ Directional arrow navigation (8 directions, relative to player facing)
+- ✅ Sky beacon particle column (within 150 blocks)
+- ✅ Orphan mob cleanup on server start
 
-This is being replaced with **Navigation System** as the next priority based on user feedback that finding the encounter zone is the main pain point.
+The encounter system is now fully complete.

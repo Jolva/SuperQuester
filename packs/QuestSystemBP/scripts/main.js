@@ -92,7 +92,8 @@ import {
   isEncounterMob,
   getQuestIdFromMob,
   countRemainingMobs,
-  initializeEncounterMobProtection
+  initializeEncounterMobProtection,
+  cleanupOrphanedMobs
 } from "./systems/EncounterSpawner.js";
 
 // Location functions (zone selection, terrain validation)
@@ -209,8 +210,15 @@ world.afterEvents.worldInitialize.subscribe(() => {
   // and triggers mob spawning when chunks are loaded
   startProximityMonitoring();
 
-  // Initialize encounter mob protection (mobs only killable by players)
+  // Initialize encounter mob protection (fire damage blocked for tagged mobs)
   initializeEncounterMobProtection();
+
+  // Phase 5: Clean up orphaned encounter mobs from crashes
+  // IMPORTANT: Delay cleanup to give players time to join first
+  // Otherwise, cleanup runs with 0 online players and removes ALL mobs as "orphans"
+  system.runTimeout(() => {
+    cleanupOrphanedMobs();
+  }, 100); // 5 second delay (100 ticks)
 });
 
 // Load data when player joins AND handle spawn location
@@ -2603,7 +2611,60 @@ function wireInteractions() {
           }
         });
       }
-      // === END PHASE 4 DEBUG COMMANDS ===
+
+      // ========================================================================
+      // === PHASE 5: Navigation & Cleanup Debug Commands ===
+      // ========================================================================
+
+      // Test directional arrow calculation
+      if (ev.message === "!nav test arrow") {
+        ev.cancel = true;
+        system.run(() => {
+          const questData = ensureQuestData(ev.sender);
+
+          if (!questData?.active?.isEncounter) {
+            ev.sender.sendMessage(`§cNo active encounter`);
+            return;
+          }
+
+          const quest = questData.active;
+          let target = quest.encounterState === "pending"
+            ? quest.encounterZone?.center
+            : quest.spawnData?.location;
+
+          if (target) {
+            const playerPos = ev.sender.location;
+            const dx = target.x - playerPos.x;
+            const dz = target.z - playerPos.z;
+            const targetAngle = Math.atan2(-dx, -dz) * (180 / Math.PI);
+            const playerYaw = ev.sender.getRotation().y;
+            let relativeAngle = targetAngle - playerYaw;
+            while (relativeAngle > 180) relativeAngle -= 360;
+            while (relativeAngle < -180) relativeAngle += 360;
+
+            const distance = Math.floor(calculateDistance(playerPos, target));
+            ev.sender.sendMessage(`§e=== Navigation Debug ===`);
+            ev.sender.sendMessage(`§fTarget: ${Math.floor(target.x)}, ${Math.floor(target.z)}`);
+            ev.sender.sendMessage(`§fDistance: ${distance}m`);
+            ev.sender.sendMessage(`§fPlayer facing: ${playerYaw.toFixed(1)}°`);
+            ev.sender.sendMessage(`§fTarget angle: ${targetAngle.toFixed(1)}°`);
+            ev.sender.sendMessage(`§fRelative angle: ${relativeAngle.toFixed(1)}°`);
+          } else {
+            ev.sender.sendMessage(`§cNo target location available`);
+          }
+        });
+      }
+
+      // Force orphan cleanup
+      if (ev.message === "!encounter cleanup") {
+        ev.cancel = true;
+        system.run(() => {
+          const count = cleanupOrphanedMobs();
+          ev.sender.sendMessage(`§aCleaned up ${count} orphaned mobs`);
+        });
+      }
+
+      // === END PHASE 5 DEBUG COMMANDS ===
     });
   }
 }

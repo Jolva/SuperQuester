@@ -10,11 +10,12 @@
  * and cleanup operations.
  *
  * CRITICAL CONTEXT:
- * - Part of Encounter System (Phases 1-4 complete)
+ * - Part of Encounter System (Phases 1-5 complete)
  * - Phase 1: Quest generation only (no spawning)
  * - Phase 2: Spawning at fixed test location (removed)
  * - Phase 3: Two-stage flow: zone assignment → proximity spawn trigger
- * - Phase 4: Logout/login persistence (despawn/respawn) ✅ COMPLETE
+ * - Phase 4: Logout/login persistence (despawn/respawn)
+ * - Phase 5: Navigation + orphan cleanup ✅ COMPLETE
  *
  * TAGGING SYSTEM:
  * Every encounter mob gets TWO tags:
@@ -44,7 +45,7 @@
  * - Quest turn-in (cleanup remaining mobs)
  * - Quest abandon (remove all mobs, allow re-accept)
  * - Player logout (temporary despawn, respawn on login)
- * - Phase 5 will add: Server restart cleanup (orphan removal)
+ * - Server restart: cleanupOrphanedMobs() removes orphaned mobs (Phase 5)
  *
  * PROTECTION SYSTEM:
  * - initializeEncounterMobProtection() blocks fire damage for tagged mobs
@@ -64,6 +65,7 @@
  */
 
 import { world, system } from "@minecraft/server";
+import { PersistenceManager } from "./PersistenceManager.js";
 
 // ============================================================================
 // CONSTANTS
@@ -482,4 +484,78 @@ export function countRemainingMobs(questId, dimension) {
     // Query failed or dimension invalid
     return 0;
   }
+}
+
+// ============================================================================
+// ORPHAN CLEANUP (Phase 5)
+// ============================================================================
+
+/**
+ * Clean up orphaned encounter mobs on server start
+ * Catches mobs left behind from crashes or incomplete cleanup
+ *
+ * WORKFLOW:
+ * 1. Query all entities with encounter mob tag
+ * 2. For each mob, check if any online player has matching quest in spawned state
+ * 3. Remove mobs with no matching active quest
+ *
+ * @returns {number} Number of mobs cleaned up
+ */
+export function cleanupOrphanedMobs() {
+  const dimension = world.getDimension("overworld");
+  let cleanedCount = 0;
+
+  try {
+    // Find all entities with encounter mob tag
+    const entities = dimension.getEntities({
+      tags: [TAG_ENCOUNTER_MOB]
+    });
+
+    for (const entity of entities) {
+      try {
+        const questTag = entity.getTags().find(tag => tag.startsWith(TAG_QUEST_PREFIX));
+
+        if (!questTag) {
+          // No quest tag - definitely orphaned
+          entity.remove();
+          cleanedCount++;
+          continue;
+        }
+
+        const questId = questTag.replace(TAG_QUEST_PREFIX, "");
+
+        // Check if any online player owns this quest in spawned state
+        let questFound = false;
+        for (const player of world.getPlayers()) {
+          try {
+            const questData = PersistenceManager.loadQuestData(player);
+            if (questData?.active?.id === questId &&
+                questData.active.encounterState === "spawned") {
+              questFound = true;
+              break;
+            }
+          } catch {
+            continue;
+          }
+        }
+
+        if (!questFound) {
+          // No active quest matches - orphaned
+          entity.remove();
+          cleanedCount++;
+        }
+      } catch (entityError) {
+        // Entity may have been removed, continue
+        console.warn(`[EncounterSpawner] Error processing entity during cleanup: ${entityError}`);
+      }
+    }
+  } catch (error) {
+    console.error(`[EncounterSpawner] Error during orphan cleanup: ${error}`);
+  }
+
+  if (cleanedCount > 0) {
+    console.warn(`[EncounterSpawner] Cleaned up ${cleanedCount} orphaned encounter mobs`);
+  }
+
+  return cleanedCount;
 }

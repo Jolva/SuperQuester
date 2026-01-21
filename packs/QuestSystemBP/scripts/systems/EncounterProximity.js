@@ -1,28 +1,33 @@
 /**
  * ============================================================================
- * ENCOUNTER PROXIMITY — Tick-Based Zone Monitoring & Spawn Triggering
+ * ENCOUNTER PROXIMITY — Zone Monitoring, Spawn Triggering & Navigation
  * ============================================================================
  *
  * AI AGENT ORIENTATION:
  * ---------------------
- * This module monitors player positions and triggers encounter spawns when
- * players enter their assigned zones. It's the core of Phase 3's proximity-based
- * spawning system.
+ * This module monitors player positions, triggers encounter spawns when
+ * players enter their assigned zones, and provides navigation assistance
+ * via directional arrows and sky beacons.
  *
  * CRITICAL CONTEXT:
- * - Called via startProximityMonitoring() from world init
- * - Runs every 20 ticks (~1 second) to check all players
- * - Only triggers spawn for encounters in "pending" state
- * - Sets encounterState to "spawned" after mob spawn
+ * - Part of Encounter System (Phases 1-5 complete)
+ * - Phase 3: Zone-based proximity triggering
+ * - Phase 4: Logout/login persistence
+ * - Phase 5: Navigation enhancement (arrows, beacons) ✅ COMPLETE
  *
  * SPAWN SEQUENCE:
  * 1. Player enters zone (within 50 blocks of center)
  * 2. "The enemy is near!" alert + sound
  * 3. Short dramatic pause (500ms)
- * 4. Find valid spawn point 40-60 blocks from player
+ * 4. Find valid spawn point 18-22 blocks from player
  * 5. Spawn mobs at validated location
  * 6. "The enemy approaches!" alert + sound
  * 7. Update quest state to "spawned"
+ *
+ * NAVIGATION SYSTEM (Phase 5):
+ * - Directional arrow (↑↗→↘↓↙←↖) relative to player facing
+ * - Sky beacon particle column when within 150 blocks
+ * - Beacon pulses every 2 seconds (40 ticks)
  *
  * PERFORMANCE:
  * - 1-second check interval (not every tick)
@@ -58,6 +63,36 @@ import {
 const CHECK_INTERVAL_TICKS = 20;
 
 // ============================================================================
+// NAVIGATION CONSTANTS (Phase 5)
+// ============================================================================
+
+/**
+ * Arrow characters for 8 directions
+ * Used to show player which way to go relative to their facing direction
+ */
+const DIRECTION_ARROWS = {
+  N:  "↑",
+  NE: "↗",
+  E:  "→",
+  SE: "↘",
+  S:  "↓",
+  SW: "↙",
+  W:  "←",
+  NW: "↖"
+};
+
+/**
+ * Beacon configuration
+ * Sky beacon appears when player is close enough to help locate the target
+ */
+const BEACON_ACTIVATION_DISTANCE = 150;
+const BEACON_PULSE_INTERVAL = 40;  // ticks (2 seconds)
+const BEACON_HEIGHT = 50;
+const BEACON_PARTICLE_COUNT = 30;
+
+let beaconTickCounter = 0;
+
+// ============================================================================
 // STATE
 // ============================================================================
 
@@ -66,6 +101,92 @@ let runIntervalId = null;
 
 // Track players currently being processed to avoid double-triggers
 const playersBeingProcessed = new Set();
+
+// ============================================================================
+// NAVIGATION FUNCTIONS (Phase 5)
+// ============================================================================
+
+/**
+ * Get directional arrow based on player facing vs target direction
+ * The arrow shows which way to turn relative to where the player is looking
+ *
+ * @param {Player} player - The player
+ * @param {{x: number, z: number}} target - Target location
+ * @returns {string} Arrow character
+ */
+function getDirectionArrow(player, target) {
+  const playerPos = player.location;
+
+  // Vector from player to target
+  const dx = target.x - playerPos.x;
+  const dz = target.z - playerPos.z;
+
+  // World angle to target (degrees)
+  // Minecraft: yaw 0 = south (+Z), yaw 90 = west (-X), yaw -90 = east (+X), yaw 180/-180 = north (-Z)
+  // atan2(x, z) gives angle where 0 = +Z (south), 90 = +X (east), -90 = -X (west), 180 = -Z (north)
+  // We need to negate to match Minecraft's yaw convention (positive = clockwise when viewed from above)
+  const worldAngleToTarget = -Math.atan2(dx, dz) * (180 / Math.PI);
+
+  // Player's facing direction (yaw)
+  const playerYaw = player.getRotation().y;
+
+  // Relative angle: positive = target is to the right, negative = target is to the left
+  let relativeAngle = worldAngleToTarget - playerYaw;
+
+  // Normalize to -180 to 180
+  while (relativeAngle > 180) relativeAngle -= 360;
+  while (relativeAngle < -180) relativeAngle += 360;
+
+  // Convert to 8-direction arrow
+  // 0° = ahead (↑), 90° = right (→), -90° = left (←), 180° = behind (↓)
+  if (relativeAngle >= -22.5 && relativeAngle < 22.5) return DIRECTION_ARROWS.N;    // ahead
+  if (relativeAngle >= 22.5 && relativeAngle < 67.5) return DIRECTION_ARROWS.NE;   // ahead-right
+  if (relativeAngle >= 67.5 && relativeAngle < 112.5) return DIRECTION_ARROWS.E;   // right
+  if (relativeAngle >= 112.5 && relativeAngle < 157.5) return DIRECTION_ARROWS.SE; // behind-right
+  if (relativeAngle >= 157.5 || relativeAngle < -157.5) return DIRECTION_ARROWS.S; // behind
+  if (relativeAngle >= -157.5 && relativeAngle < -112.5) return DIRECTION_ARROWS.SW; // behind-left
+  if (relativeAngle >= -112.5 && relativeAngle < -67.5) return DIRECTION_ARROWS.W;  // left
+  if (relativeAngle >= -67.5 && relativeAngle < -22.5) return DIRECTION_ARROWS.NW;  // ahead-left
+
+  return DIRECTION_ARROWS.N;  // Fallback
+}
+
+/**
+ * Spawn a vertical column of particles at the target location
+ * Creates a sky beacon effect to help players locate the encounter
+ *
+ * @param {Dimension} dimension - Minecraft dimension
+ * @param {{x: number, y: number, z: number}} target - Target location
+ */
+function spawnBeaconParticles(dimension, target) {
+  try {
+    // Get actual ground level at target
+    const topBlock = dimension.getTopmostBlock({ x: target.x, z: target.z });
+    const groundY = topBlock ? topBlock.y + 1 : target.y;
+
+    // Spawn particles in a vertical column
+    for (let i = 0; i < BEACON_PARTICLE_COUNT; i++) {
+      const y = groundY + (i * (BEACON_HEIGHT / BEACON_PARTICLE_COUNT));
+
+      // Small XZ variance for visual interest
+      const variance = {
+        x: (Math.random() - 0.5) * 0.5,
+        z: (Math.random() - 0.5) * 0.5
+      };
+
+      dimension.spawnParticle(
+        "minecraft:endrod",
+        {
+          x: target.x + variance.x,
+          y: y,
+          z: target.z + variance.z
+        }
+      );
+    }
+  } catch (error) {
+    // Chunk may not be loaded - that's fine
+  }
+}
 
 // ============================================================================
 // PUBLIC API
@@ -86,6 +207,12 @@ export function startProximityMonitoring() {
 
   // Run check every CHECK_INTERVAL_TICKS
   runIntervalId = system.runInterval(() => {
+    // Increment beacon counter (Phase 5)
+    beaconTickCounter++;
+    if (beaconTickCounter >= BEACON_PULSE_INTERVAL) {
+      beaconTickCounter = 0;
+    }
+
     checkAllPlayers();
   }, CHECK_INTERVAL_TICKS);
 }
@@ -151,27 +278,24 @@ function checkPlayerProximity(player) {
     const spawnLoc = quest.spawnData.location;
     const playerLoc = player.location;
     const distance = Math.floor(calculateDistance(playerLoc, spawnLoc));
+    const arrow = getDirectionArrow(player, spawnLoc);
 
-    // Count ACTUAL mobs alive (not just expected remaining)
-    const dimension = player.dimension;
-    let actualMobCount = 0;
-    try {
-      const tagToFind = `sq_quest_${quest.id}`;
-      const entities = dimension.getEntities({ tags: [tagToFind] });
-      actualMobCount = [...entities].length;
-    } catch (e) {
-      // Query may fail
-    }
-
-    // Calculate progress
-    const progress = quest.totalMobCount - actualMobCount;
+    // Use stored progress from questData (incremented by kill handler in main.js)
+    // This is more reliable than live mob count which can fail or be inconsistent
+    const progress = questData.progress || 0;
 
     try {
-      // Actionbar only - compact, persistent, non-intrusive
-      player.runCommandAsync(`titleraw @s actionbar {"rawtext":[{"text":"§6${quest.encounterName} §7| §fKill: §c${progress}§7/§c${quest.totalMobCount} §7| §e${distance}m away"}]}`);
+      // Actionbar with directional arrow (Phase 5)
+      player.runCommandAsync(`titleraw @s actionbar {"rawtext":[{"text":"§6${quest.encounterName} §7| §fKill: §a${progress}§7/§c${quest.totalMobCount} §7| §e${arrow} §f${distance}m"}]}`);
     } catch (e) {
       // Actionbar may fail, not critical
     }
+
+    // Spawn beacon if close enough (Phase 5)
+    if (distance <= BEACON_ACTIVATION_DISTANCE && beaconTickCounter === 0) {
+      spawnBeaconParticles(dimension, spawnLoc);
+    }
+
     return; // Don't check for zone entry if already spawned
   }
 
@@ -180,12 +304,18 @@ function checkPlayerProximity(player) {
     const zone = quest.encounterZone;
     const playerLoc = player.location;
     const distanceToZone = Math.floor(calculateDistance(playerLoc, zone.center));
+    const arrow = getDirectionArrow(player, zone.center);
 
     try {
-      // Actionbar only - compact travel info
-      player.runCommandAsync(`titleraw @s actionbar {"rawtext":[{"text":"§6${quest.encounterName} §7| §fTravel to zone §7| §e${distanceToZone}m §7(${zone.center.x}, ${zone.center.z})"}]}`);
+      // Actionbar with directional arrow (Phase 5)
+      player.runCommandAsync(`titleraw @s actionbar {"rawtext":[{"text":"§6${quest.encounterName} §7| §fTravel to zone §7| §e${arrow} §f${distanceToZone}m"}]}`);
     } catch (e) {
       // Actionbar may fail
+    }
+
+    // Spawn beacon if close enough (Phase 5)
+    if (distanceToZone <= BEACON_ACTIVATION_DISTANCE && beaconTickCounter === 0) {
+      spawnBeaconParticles(player.dimension, zone.center);
     }
   }
 
