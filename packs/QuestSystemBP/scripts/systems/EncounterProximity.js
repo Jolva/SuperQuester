@@ -49,7 +49,8 @@ import {
   isPlayerInZone,
   findSpawnPointNearPlayer,
   getFallbackLocation,
-  calculateDistance
+  calculateDistance,
+  getQuestBoardPosition
 } from "./LocationValidator.js";
 
 // ============================================================================
@@ -336,8 +337,21 @@ function checkPlayerProximity(player) {
     }
   }
 
-  // Early exit: Already complete
-  if (quest.encounterState === "complete") return;
+  // === COMPLETE ENCOUNTER: Navigate back to quest board ===
+  if (quest.encounterState === "complete") {
+    const boardPos = getQuestBoardPosition();
+    const playerLoc = player.location;
+    const distance = Math.floor(calculateDistance(playerLoc, boardPos));
+    const arrow = getDirectionArrow(player, boardPos);
+
+    try {
+      player.runCommandAsync(`titleraw @s actionbar {"rawtext":[{"text":"§aQuest complete! §7| §fReturn to board §7| §e${arrow} §f${distance}m"}]}`);
+    } catch (e) {
+      // Actionbar may fail, not critical
+    }
+
+    return;
+  }
 
   // Early exit: Not pending (shouldn't happen after above checks)
   if (quest.encounterState !== "pending") return;
