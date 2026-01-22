@@ -92,15 +92,41 @@ const DIRECTION_ARROWS = {
 };
 
 /**
- * Beacon configuration
+ * Beacon configuration (Phase 5 Enhanced)
  * Sky beacon appears when player is close enough to help locate the target
+ *
+ * IMPROVEMENTS:
+ * - Two-stage activation (far = top cap only, near = full beam)
+ * - Thicker beam via ring columns
+ * - Spiral animation for visibility
+ * - Base flare for close-up presence
+ * - Top cap marker for long-distance visibility
+ * - Faster pulse rate (1 second vs 2 seconds)
  */
-const BEACON_ACTIVATION_DISTANCE = 150;
-const BEACON_PULSE_INTERVAL = 40;  // ticks (2 seconds)
-const BEACON_HEIGHT = 50;
-const BEACON_PARTICLE_COUNT = 30;
+const BEACON_FAR_DISTANCE = 300;         // Show faint top cap at this distance
+const BEACON_NEAR_DISTANCE = 150;        // Show full beam at this distance
+const BEACON_PULSE_INTERVAL = 20;        // ticks (1 second for better visibility)
+const BEACON_HEIGHT = 80;                // Taller beam for "beacon from sky" effect
+const BEACON_PARTICLE_COUNT = 40;        // More particles for smoother appearance
 
+// Beam thickness configuration
+const BEAM_RADIUS = 1.8;                 // How thick the beam is
+const BEAM_COLUMNS = 10;                 // Number of mini-columns around center
+const BEAM_SHIMMER = 0.15;               // Random variance for sparkle effect
+
+// Top cap configuration (visible from far away)
+const TOP_CAP_RADIUS = 2.5;              // Size of the star/burst at top
+const TOP_CAP_PARTICLES = 18;            // Number of particles in top ring
+const TOP_CAP_HEIGHT_VARIANCE = 1.5;     // Vertical spread of top cap
+
+// Base flare configuration (visible up close)
+const BASE_FLARE_RADIUS = 3;             // Ground burst radius
+const BASE_FLARE_PARTICLES = 24;         // Number of particles in ground burst
+const BASE_FLARE_HEIGHT = 0.8;           // Vertical spread of base flare
+
+// Animation
 let beaconTickCounter = 0;
+let beaconSpiralPhase = 0;               // For spiral animation
 
 // ============================================================================
 // STATE
@@ -170,37 +196,120 @@ function getDirectionArrow(player, target) {
 }
 
 /**
- * Spawn a vertical column of particles at the target location
- * Creates a sky beacon effect to help players locate the encounter
+ * Spawn a base flare effect at ground level
+ * Creates a radial burst that's visible when player is near the beacon
+ *
+ * @param {Dimension} dimension - Minecraft dimension
+ * @param {{x: number, y: number, z: number}} pos - Ground position
+ */
+function spawnBaseFlare(dimension, pos) {
+  try {
+    for (let i = 0; i < BASE_FLARE_PARTICLES; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const radius = Math.random() * BASE_FLARE_RADIUS;
+
+      dimension.spawnParticle("minecraft:endrod", {
+        x: pos.x + Math.cos(angle) * radius,
+        y: pos.y + (Math.random() * BASE_FLARE_HEIGHT),
+        z: pos.z + Math.sin(angle) * radius
+      });
+    }
+  } catch (error) {
+    // Chunk may not be loaded
+  }
+}
+
+/**
+ * Spawn a top cap marker at the peak of the beacon
+ * Creates a bright star/burst that's visible from far away
+ *
+ * @param {Dimension} dimension - Minecraft dimension
+ * @param {{x: number, y: number, z: number}} pos - Top position
+ */
+function spawnTopCap(dimension, pos) {
+  try {
+    const topY = pos.y + BEACON_HEIGHT + 2;
+
+    // Ring of particles at the top
+    for (let i = 0; i < TOP_CAP_PARTICLES; i++) {
+      const angle = (Math.PI * 2 * i) / TOP_CAP_PARTICLES;
+
+      dimension.spawnParticle("minecraft:endrod", {
+        x: pos.x + Math.cos(angle) * TOP_CAP_RADIUS,
+        y: topY + (Math.random() * TOP_CAP_HEIGHT_VARIANCE),
+        z: pos.z + Math.sin(angle) * TOP_CAP_RADIUS
+      });
+    }
+
+    // Center burst for extra brightness
+    for (let i = 0; i < 6; i++) {
+      dimension.spawnParticle("minecraft:endrod", {
+        x: pos.x + (Math.random() - 0.5) * 0.5,
+        y: topY + (Math.random() * TOP_CAP_HEIGHT_VARIANCE),
+        z: pos.z + (Math.random() - 0.5) * 0.5
+      });
+    }
+  } catch (error) {
+    // Chunk may not be loaded
+  }
+}
+
+/**
+ * Spawn the full beacon effect with thick beam, spiral animation, and effects
+ * Creates a dramatic sky beacon that's visible from distance
  *
  * @param {Dimension} dimension - Minecraft dimension
  * @param {{x: number, y: number, z: number}} target - Target location
+ * @param {boolean} fullBeam - If true, show full beam; if false, show top cap only
  */
-function spawnBeaconParticles(dimension, target) {
+function spawnBeaconParticles(dimension, target, fullBeam = true) {
   try {
     // Get actual ground level at target
     const topBlock = dimension.getTopmostBlock({ x: target.x, z: target.z });
     const groundY = topBlock ? topBlock.y + 1 : target.y;
 
-    // Spawn particles in a vertical column
-    for (let i = 0; i < BEACON_PARTICLE_COUNT; i++) {
-      const y = groundY + (i * (BEACON_HEIGHT / BEACON_PARTICLE_COUNT));
-
-      // Small XZ variance for visual interest
-      const variance = {
-        x: (Math.random() - 0.5) * 0.5,
-        z: (Math.random() - 0.5) * 0.5
-      };
-
-      dimension.spawnParticle(
-        "minecraft:endrod",
-        {
-          x: target.x + variance.x,
-          y: y,
-          z: target.z + variance.z
-        }
-      );
+    if (!fullBeam) {
+      // Far away: just show top cap for performance
+      spawnTopCap(dimension, { x: target.x, y: groundY, z: target.z });
+      return;
     }
+
+    // Near: show full beam with all effects
+
+    // 1. THICK BEAM: Multiple columns in a ring with spiral animation
+    for (let c = 0; c < BEAM_COLUMNS; c++) {
+      const angle = (Math.PI * 2 * c) / BEAM_COLUMNS + beaconSpiralPhase;
+      const offsetX = Math.cos(angle) * BEAM_RADIUS;
+      const offsetZ = Math.sin(angle) * BEAM_RADIUS;
+
+      // Spawn particles along this column with tapered distribution
+      for (let i = 0; i < BEACON_PARTICLE_COUNT; i++) {
+        // Cubic taper: more particles towards the top for "beacon from sky" feel
+        const t = i / (BEACON_PARTICLE_COUNT - 1);
+        const biased = 1 - Math.pow(1 - t, 3);
+        const y = groundY + biased * BEACON_HEIGHT;
+
+        // Small shimmer for sparkle effect
+        const shimmerX = (Math.random() - 0.5) * BEAM_SHIMMER;
+        const shimmerZ = (Math.random() - 0.5) * BEAM_SHIMMER;
+
+        dimension.spawnParticle("minecraft:endrod", {
+          x: target.x + offsetX + shimmerX,
+          y: y,
+          z: target.z + offsetZ + shimmerZ
+        });
+      }
+    }
+
+    // 2. BASE FLARE: Ground burst for close-up visibility
+    spawnBaseFlare(dimension, { x: target.x, y: groundY, z: target.z });
+
+    // 3. TOP CAP: Bright marker at the peak
+    spawnTopCap(dimension, { x: target.x, y: groundY, z: target.z });
+
+    // Advance spiral animation phase
+    beaconSpiralPhase += 0.1;  // Slow rotation over time
+
   } catch (error) {
     // Chunk may not be loaded - that's fine
   }
@@ -309,9 +418,22 @@ function checkPlayerProximity(player) {
       // Actionbar may fail, not critical
     }
 
-    // Spawn beacon if close enough (Phase 5)
-    if (distance <= BEACON_ACTIVATION_DISTANCE && beaconTickCounter === 0) {
-      spawnBeaconParticles(player.dimension, spawnLoc);
+    // Spawn beacon with two-stage activation (Phase 5 Enhanced)
+    if (beaconTickCounter === 0) {
+      if (distance <= BEACON_NEAR_DISTANCE) {
+        // Near: Full beam with all effects
+        spawnBeaconParticles(player.dimension, spawnLoc, true);
+
+        // Play subtle beacon pulse sound
+        try {
+          player.playSound("beacon.ambient", { volume: 0.3, pitch: 1.2 });
+        } catch (e) {
+          // Sound may fail
+        }
+      } else if (distance <= BEACON_FAR_DISTANCE) {
+        // Far: Top cap only (performance friendly)
+        spawnBeaconParticles(player.dimension, spawnLoc, false);
+      }
     }
 
     return; // Don't check for zone entry if already spawned
@@ -331,9 +453,22 @@ function checkPlayerProximity(player) {
       // Actionbar may fail
     }
 
-    // Spawn beacon if close enough (Phase 5)
-    if (distanceToZone <= BEACON_ACTIVATION_DISTANCE && beaconTickCounter === 0) {
-      spawnBeaconParticles(player.dimension, zone.center);
+    // Spawn beacon with two-stage activation (Phase 5 Enhanced)
+    if (beaconTickCounter === 0) {
+      if (distanceToZone <= BEACON_NEAR_DISTANCE) {
+        // Near: Full beam with all effects
+        spawnBeaconParticles(player.dimension, zone.center, true);
+
+        // Play subtle beacon pulse sound
+        try {
+          player.playSound("beacon.ambient", { volume: 0.3, pitch: 1.2 });
+        } catch (e) {
+          // Sound may fail
+        }
+      } else if (distanceToZone <= BEACON_FAR_DISTANCE) {
+        // Far: Top cap only (performance friendly)
+        spawnBeaconParticles(player.dimension, zone.center, false);
+      }
     }
   }
 
