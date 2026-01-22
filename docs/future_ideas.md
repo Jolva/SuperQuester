@@ -58,3 +58,20 @@ Gacha Reward Capsules:
   - Common (100 SP): Food, basic resources, iron.
   - Rare (300 SP): Enchanted books, diamond gear, music discs.
   - Legendary (1000 SP): Custom pets, particle trails, mending books.
+
+
+6. Loot Explosion & Reward Celebration System
+When you complete a quest or hit SP milestones, the game celebrates you — gold coins burst from your position with custom particle effects, a triumphant sound effect plays, floating "+50 SP" text rises and fades, maybe even a brief screen flash. Think Diablo loot explosions meets mobile game dopamine hits. Every quest completion becomes a moment.
+Why it works: Immediate, visceral feedback loop. Your kids will want to complete quests just to see the celebration again.
+
+7. Custom Boss Encounters with Phase Mechanics
+Your mythic/legendary encounters spawn a visually distinct boss mob (custom geometry, glowing effects, particle auras) with a dramatic custom health bar UI at the top of the screen. The boss has phases — at 50% health, music intensifies, it summons adds, the arena changes. Victory triggers a massive celebration sequence.
+Why it works: Nothing says "this isn't vanilla" like fighting a glowing three-phase boss with its own health bar and soundtrack.
+
+8. Cosmetic Rewards & Player Flair System
+Spend SP on visible cosmetics: particle trails when you walk, floating titles above your head ("Dragon Slayer," "Quest Master"), custom death effects, maybe even summonable cosmetic pets. Your progression becomes visible to others on the server.
+Why it works: Gives SP lasting meaning beyond transactions. Your seven-year-old can show off their sparkle trail to siblings.
+
+9. Companion System
+Summon quest companions — a spectral wolf, a tiny golem helper, a floating wisp. They follow you, maybe assist in combat or provide small buffs. Unlockable/purchasable with SP, with rarer companions having cooler visual effects.
+Why it works: Kids love pets. Having your own glowing spirit wolf companion is inherently cool.

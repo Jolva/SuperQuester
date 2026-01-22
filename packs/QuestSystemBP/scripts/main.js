@@ -324,6 +324,7 @@ world.afterEvents.playerLeave.subscribe((ev) => {
   const playerId = ev.playerId;
   playerMusicState.delete(playerId);
   playerDogBarkState.delete(playerId);
+  playerQuestDataCache.delete(playerId); // Clear quest data cache
 
   // Despawn any guardian cats
   const catSquad = playerCatSquad.get(playerId);
@@ -517,6 +518,13 @@ const playerDogBarkState = new Map();
 // Tracks per-player spawned cats: { cats: Entity[], lastTier: number }
 const playerCatSquad = new Map();
 
+// === QUEST DATA CACHE ===
+// In-memory cache of player quest data to prevent race conditions on rapid updates.
+// Map<playerId, QuestData>
+// Loaded from dynamic properties on player join, updated on every quest change,
+// and saved back to dynamic properties. This prevents multiple rapid events
+// (like killing 9 mobs quickly) from overwriting each other's progress.
+const playerQuestDataCache = new Map();
 
 // === PLAYER NAME REGISTRY ===
 // Stores player names in world dynamic properties so leaderboard can display
@@ -739,11 +747,21 @@ function getPlayerKey(player) {
 /**
  * Ensures player has valid quest data, creating or refreshing as needed.
  * Call this before any quest system access.
+ *
+ * IMPORTANT: Uses in-memory cache to prevent race conditions on rapid updates.
+ * Multiple rapid kills (e.g., 9 mobs dying quickly) will all see the same
+ * cached object instead of reloading stale data from disk.
+ *
  * @param {import("@minecraft/server").Player} player
  * @returns {QuestData}
  */
 function ensureQuestData(player) {
-  // Try new format first
+  // Check cache first to prevent race conditions
+  if (playerQuestDataCache.has(player.id)) {
+    return playerQuestDataCache.get(player.id);
+  }
+
+  // Not in cache - load from persistence
   let data = PersistenceManager.loadQuestData(player);
 
   if (!data) {
@@ -786,6 +804,9 @@ function ensureQuestData(player) {
       PersistenceManager.saveQuestData(player, data);
       console.warn(`[QuestSystem] Initialized quest data for ${player.name}`);
     }
+
+    // Cache the new data
+    playerQuestDataCache.set(player.id, data);
     return data;
   }
 
@@ -812,6 +833,8 @@ function ensureQuestData(player) {
     console.warn(`[QuestSystem] Auto-refreshed quests for ${player.name} (24h expired)`);
   }
 
+  // Cache the loaded/refreshed data
+  playerQuestDataCache.set(player.id, data);
   return data;
 }
 
