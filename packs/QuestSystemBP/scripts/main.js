@@ -727,7 +727,6 @@ function updateSPDisplay(player) {
   }
 }
 
-
 /** -----------------------------
  *  State helpers
  *  ----------------------------- */

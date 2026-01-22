@@ -13,8 +13,7 @@
 **For specific work:**
 - [CODING_STANDARDS.md](CODING_STANDARDS.md) - Constraints and forbidden patterns
 - [AUDIO_SYSTEM.md](AUDIO_SYSTEM.md) - How to add/modify sounds
-- [SP_Coin_Animation_Specification.md](SP_Coin_Animation_Specification.md) - HUD system details
-- [AI_HANDOFF_PROMPT.md](AI_HANDOFF_PROMPT.md) - Legacy handoff template
+- [COMMAND_REFERENCE.md](COMMAND_REFERENCE.md) - In-game admin commands
 
 ---
 
@@ -38,23 +37,37 @@
 
 | File | Purpose |
 |------|---------|
-| `QuestGenerator.js` | Creates randomized quests with rarity tiers. Stateless — just generates quest objects. |
+| `QuestGenerator.js` | Creates randomized quests with rarity tiers. Routes Rare/Legendary to EncounterManager. |
 | `PersistenceManager.js` | Saves/loads player quest data to `player.setDynamicProperty()`. |
 | `AtmosphereManager.js` | Quest board proximity effects (particles, night vision, sounds within 10 blocks). |
+| `SPManager.js` | Centralized SP (Super Points) API. Wraps scoreboard operations. |
+| `RewardCalculator.js` | Calculates quest rewards with rarity, type modifiers, jackpots, and streaks. |
+| `StreakTracker.js` | Tracks consecutive quest completions for session-based bonuses. |
+| `EncounterManager.js` | Generates encounter-based quests using curated mob groups from EncounterTable. |
+| `EncounterSpawner.js` | Handles mob spawning, dual-tagging, tracking, and cleanup for encounters. |
+| `EncounterProximity.js` | Monitors players, triggers spawns on zone entry, provides navigation arrows/beacons. |
+| `LocationValidator.js` | Zone selection and terrain validation for encounter spawn points. |
 
 ### Data (`scripts/data/`)
 
 | File | Purpose |
 |------|---------|
-| `QuestData.js` | Static data pools: MOB_POOL, ITEM_POOL, LORE_TEMPLATES. |
+| `QuestData.js` | Static data pools: MOB_POOL, ITEM_POOL, LORE_TEMPLATES for standard quests. |
+| `EconomyConfig.js` | Single source of truth for all economy values (rewards, costs, modifiers, streaks). |
+| `EncounterTable.js` | Pre-configured mob encounters for Rare/Legendary/Mythic quests. |
+
+### Quests (`scripts/quests/`)
+
+| File | Purpose |
+|------|---------|
+| `mobTypes.js` | Maps entity variants to canonical types (zombie_villager → "zombie"). Used by kill tracking. |
 
 ### Deleted Files (Post-Cleanup)
 
 These files were removed as dead code on 2026-01-17:
 - ~~`config.js`~~ — Was imported but never used
-- ~~`scoreboard.js`~~ — `ensureObjective()` was never called  
+- ~~`scoreboard.js`~~ — `ensureObjective()` was never called
 - ~~`ui_manager.js`~~ — Legacy UI helper, replaced by main.js implementation
-- ~~`quests/mobTypes.js`~~ — `getMobType()` was imported but never called
 
 ---
 
