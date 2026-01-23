@@ -69,6 +69,12 @@ import {
     setModifySPReference
 } from "./systems/SPManager.js";
 
+// Celebration System
+import {
+    celebrateSPGain,
+    celebrateQuestComplete
+} from "./systems/CelebrationManager.js";
+
 import {
     calculateCompletionReward,
     rollRarity
@@ -625,12 +631,13 @@ function getSP(player) {
 /**
  * Modifies a player's Super Points balance.
  * Updates both the scoreboard (authoritative) and dynamic property backup.
- * 
+ *
  * @param {import("@minecraft/server").Player} player - The player to modify
  * @param {number} delta - Amount to add (positive) or subtract (negative)
+ * @param {Object} options - Optional configuration (e.g., skipCelebration)
  * @returns {number} The new balance
  */
-function modifySP(player, delta) {
+function modifySP(player, delta, options = {}) {
   const objective = world.scoreboard.getObjective(SCOREBOARD_OBJECTIVE_ID);
   if (!objective) {
     console.warn("[SP] Cannot modify SP - objective not found");
@@ -658,6 +665,13 @@ function modifySP(player, delta) {
 
   // Update HUD display
   updateSPDisplay(player);
+
+  // Celebration feedback for SP gains (with delay to let HUD update first)
+  if (delta > 0 && !options.skipCelebration) {
+    system.runTimeout(() => {
+      celebrateSPGain(player, delta);
+    }, 5);  // 5-tick delay (~0.25s) to ensure HUD updates before celebration
+  }
 
   return newBalance;
 }
@@ -1923,7 +1937,7 @@ function handleQuestTurnIn(player) {
 
   // Award SP using new economy system
   if (rewardResult.finalAmount > 0) {
-    addSP(player, rewardResult.finalAmount);
+    addSP(player, rewardResult.finalAmount, { skipCelebration: true });
   }
 
   // Increment streak
@@ -3114,6 +3128,26 @@ system.afterEvents.scriptEventReceive.subscribe((event) => {
       player.sendMessage("§cFailed to award SP.");
     }
   }
+});
+
+// ============================================================================
+// CELEBRATION SYSTEM - Test Command
+// ============================================================================
+// Test command for celebration effects
+// Usage: /scriptevent sq:test_spgain [amount]
+// ============================================================================
+system.afterEvents.scriptEventReceive.subscribe((event) => {
+  if (event.id !== "sq:test_spgain") return;
+
+  const player = event.sourceEntity;
+  if (!player || player.typeId !== "minecraft:player") {
+    console.warn("[Celebration] Test command must be run by a player");
+    return;
+  }
+
+  const amount = parseInt(event.message) || 50;
+  celebrateSPGain(player, amount);
+  player.sendMessage(`§aTesting celebration effect with §e${amount} SP§a gain`);
 });
 
 // ============================================================================

@@ -67,9 +67,10 @@ export function setModifySPReference(fn) {
  *
  * @param {Player} player - The player to credit
  * @param {number} amount - Amount to add (must be positive)
+ * @param {Object} options - Optional configuration (e.g., skipCelebration)
  * @returns {{ success: boolean, newBalance: number }}
  */
-export function addSP(player, amount) {
+export function addSP(player, amount, options = {}) {
     if (amount < 0) {
         console.error(`[SPManager] addSP called with negative amount: ${amount}. Use deductSP instead.`);
         return { success: false, newBalance: getSP(player) };
@@ -82,7 +83,7 @@ export function addSP(player, amount) {
 
     // Call the existing modifySP function from main.js
     // This maintains animation triggers and backup sync
-    const newBalance = modifySPRef(player, amount);
+    const newBalance = modifySPRef(player, amount, options);
 
     return { success: true, newBalance };
 }

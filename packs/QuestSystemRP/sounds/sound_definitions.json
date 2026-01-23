@@ -221,6 +221,46 @@
           "load_on_low_memory": true
         }
       ]
+    },
+    "celebration.coin_clink_1": {
+      "category": "player",
+      "sounds": [
+        {
+          "name": "sounds/ui/coin_clink_1",
+          "volume": 1.0,
+          "load_on_low_memory": true
+        }
+      ]
+    },
+    "celebration.coin_clink_2": {
+      "category": "player",
+      "sounds": [
+        {
+          "name": "sounds/ui/coin_clink_2",
+          "volume": 1.0,
+          "load_on_low_memory": true
+        }
+      ]
+    },
+    "celebration.coin_clink_3": {
+      "category": "player",
+      "sounds": [
+        {
+          "name": "sounds/ui/coin_clink_3",
+          "volume": 1.0,
+          "load_on_low_memory": true
+        }
+      ]
+    },
+    "celebration.coin_clink_4": {
+      "category": "player",
+      "sounds": [
+        {
+          "name": "sounds/ui/coin_clink_4",
+          "volume": 1.0,
+          "load_on_low_memory": true
+        }
+      ]
     }
   }
 }

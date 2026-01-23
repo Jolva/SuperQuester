@@ -8,7 +8,6 @@
  * This module creates magical ambiance near the quest board. When players
  * approach within 10 blocks, they experience:
  *   • Night Vision (makes the area bright and clear)
- *   • Slow Falling (floaty "holy" weightlessness)
  *   • Particle effects (white end_rod sparkles above the board)
  *   • Custom ambient sounds (magical hum + chimes)
  * 
@@ -62,9 +61,6 @@ export class AtmosphereManager {
         // --- EFFECTS ---
         // Night Vision (200 ticks = 10s) -> Makes it bright and clear
         player.addEffect("night_vision", 200, { amplifier: 0, showParticles: false });
-
-        // Slow Falling -> Adds the floaty "Holy" weightlessness
-        player.addEffect("slow_falling", 200, { amplifier: 0, showParticles: false });
 
         // --- PARTICLES ---
         // White sparkles (end_rod) above the board
