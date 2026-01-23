@@ -261,6 +261,56 @@
           "load_on_low_memory": true
         }
       ]
+    },
+    "celebration.fanfare_rare": {
+      "category": "player",
+      "sounds": [
+        {
+          "name": "sounds/ui/fanfare_rare",
+          "volume": 1.0,
+          "load_on_low_memory": true
+        }
+      ]
+    },
+    "celebration.fanfare_legendary": {
+      "category": "player",
+      "sounds": [
+        {
+          "name": "sounds/ui/fanfare_legendary",
+          "volume": 1.0,
+          "load_on_low_memory": true
+        }
+      ]
+    },
+    "celebration.fanfare_mythic": {
+      "category": "player",
+      "sounds": [
+        {
+          "name": "sounds/ui/fanfare_mythic",
+          "volume": 1.0,
+          "load_on_low_memory": true
+        }
+      ]
+    },
+    "celebration.jackpot": {
+      "category": "player",
+      "sounds": [
+        {
+          "name": "sounds/ui/jackpot",
+          "volume": 1.0,
+          "load_on_low_memory": true
+        }
+      ]
+    },
+    "celebration.streak": {
+      "category": "player",
+      "sounds": [
+        {
+          "name": "sounds/ui/streak",
+          "volume": 1.0,
+          "load_on_low_memory": true
+        }
+      ]
     }
   }
 }

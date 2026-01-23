@@ -3,11 +3,11 @@
   "header": {
     "name": "Quest System RP",
     "description": "Resource pack for Super Quester",
-    "uuid": "bea38304-818c-4812-bd0e-420b849fc870",
+    "uuid": "aa020d20-704c-4d54-87c4-fc9e0a67a308",
     "version": [
       1,
       0,
-      301
+      307
     ],
     "min_engine_version": [
       1,
@@ -18,21 +18,21 @@
   "modules": [
     {
       "type": "resources",
-      "uuid": "39b4e473-06f8-4060-b95a-2e48549d61f1",
+      "uuid": "ee572c1e-915a-4260-96ea-5441d0a7a21d",
       "version": [
         1,
         0,
-        301
+        307
       ]
     }
   ],
   "dependencies": [
     {
-      "uuid": "89bafb43-57af-434d-bbe5-d5d229599737",
+      "uuid": "684a88c4-de02-4eb1-a9eb-4e3ae6c92a3a",
       "version": [
         1,
         0,
-        301
+        307
       ]
     }
   ],

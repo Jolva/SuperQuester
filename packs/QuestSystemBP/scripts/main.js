@@ -75,6 +75,9 @@ import {
     celebrateQuestComplete
 } from "./systems/CelebrationManager.js";
 
+// SP Count-Up Animation
+import * as SPAnimator from "./systems/SPAnimator.js";
+
 import {
     calculateCompletionReward,
     rollRarity
@@ -331,6 +334,13 @@ world.afterEvents.playerLeave.subscribe((ev) => {
   playerMusicState.delete(playerId);
   playerDogBarkState.delete(playerId);
   playerQuestDataCache.delete(playerId); // Clear quest data cache
+
+  // Clean up SP count-up animations
+  const players = world.getAllPlayers();
+  const leavingPlayer = players.find(p => p.id === playerId);
+  if (leavingPlayer) {
+    SPAnimator.clearPlayerAnimation(leavingPlayer);
+  }
 
   // Despawn any guardian cats
   const catSquad = playerCatSquad.get(playerId);
@@ -644,11 +654,12 @@ function modifySP(player, delta, options = {}) {
     return 0;
   }
 
-  // Get current balance
+  // Capture old value BEFORE modification for animation
   let current = 0;
   if (player.scoreboardIdentity) {
     current = objective.getScore(player.scoreboardIdentity) ?? 0;
   }
+  const oldValue = current;
 
   // Calculate new balance (floor at 0)
   const newBalance = Math.max(0, current + delta);
@@ -663,14 +674,21 @@ function modifySP(player, delta, options = {}) {
     PersistenceManager.saveQuestData(player, data);
   }
 
-  // Update HUD display
-  updateSPDisplay(player);
+  // Animated display update for gains, instant for losses
+  if (delta > 0) {
+    updateSPDisplay(player, newBalance, { 
+      animate: true, 
+      oldValue: oldValue 
+    });
+  } else {
+    updateSPDisplay(player, newBalance, { animate: false });
+  }
 
-  // Celebration feedback for SP gains (with delay to let HUD update first)
+  // Celebration feedback for SP gains (with delay to let animation start)
   if (delta > 0 && !options.skipCelebration) {
     system.runTimeout(() => {
       celebrateSPGain(player, delta);
-    }, 5);  // 5-tick delay (~0.25s) to ensure HUD updates before celebration
+    }, 5);  // 5-tick delay (~0.25s) to coordinate with count-up
   }
 
   return newBalance;
@@ -731,18 +749,51 @@ function initializePlayerSP(player) {
  * 3. String extraction: strips "SPVAL:" prefix to display the number
  * 4. Result: Custom HUD shows static coin + number
  *
+ * PHASE 3: NOW WITH ANIMATION!
+ * - Supports animated count-up via SPAnimator
+ * - Pass options.animate = true for count-up effect
+ * - Pass options.oldValue for starting point
+ *
  * @param {import("@minecraft/server").Player} player
+ * @param {number} value - SP value to display (if not animating, reads from scoreboard)
+ * @param {Object} options - Animation options
+ * @param {boolean} options.animate - Whether to animate the change
+ * @param {number} options.oldValue - Previous value (required if animate=true)
  */
-function updateSPDisplay(player) {
-  const sp = getSP(player);
+function updateSPDisplay(player, value, options = {}) {
+  if (options.animate && options.oldValue !== undefined) {
+    const newValue = value ?? getSP(player);
+    if (options.oldValue !== newValue) {
+      SPAnimator.animateCountUp(
+        player,
+        options.oldValue,
+        newValue,
+        sendSPDisplayValue  // callback to actually update display
+      );
+      return;
+    }
+  }
+  
+  // Instant update (no animation)
+  const displayValue = value ?? getSP(player);
+  sendSPDisplayValue(player, displayValue);
+}
 
+/**
+ * Raw SP display update - actually sends the titleraw command.
+ * This is called by SPAnimator during count-up or directly for instant updates.
+ * 
+ * @param {import("@minecraft/server").Player} player
+ * @param {number} value - The exact SP value to display
+ */
+function sendSPDisplayValue(player, value) {
   try {
     // Invisible timing: 0 fade in, 1 tick stay, 0 fade out
     // JSON UI still captures the value even with minimal duration
     player.runCommandAsync(`titleraw @s times 0 1 0`);
 
     // Send title with SP value
-    player.runCommandAsync(`titleraw @s title {"rawtext":[{"text":"SPVAL:${sp}"}]}`);
+    player.runCommandAsync(`titleraw @s title {"rawtext":[{"text":"SPVAL:${value}"}]}`);
 
   } catch (e) {
     console.warn(`[SuperQuester] Failed to update SP display for ${player.name}: ${e}`);
@@ -1938,6 +1989,17 @@ function handleQuestTurnIn(player) {
   // Award SP using new economy system
   if (rewardResult.finalAmount > 0) {
     addSP(player, rewardResult.finalAmount, { skipCelebration: true });
+    
+    // Trigger rarity-scaled celebration
+    // Small delay ensures SP display updates first
+    system.runTimeout(() => {
+      celebrateQuestComplete(player, {
+        rarity: quest.rarity,
+        spAmount: rewardResult.finalAmount,
+        isJackpot: rewardResult.isJackpot || false,
+        streakLabel: rewardResult.streakLabel || null
+      });
+    }, 3);
   }
 
   // Increment streak
@@ -3148,6 +3210,126 @@ system.afterEvents.scriptEventReceive.subscribe((event) => {
   const amount = parseInt(event.message) || 50;
   celebrateSPGain(player, amount);
   player.sendMessage(`§aTesting celebration effect with §e${amount} SP§a gain`);
+});
+
+// ============================================================================
+// PHASE 2: Quest Celebration Test Commands
+// Usage: /scriptevent sq:test_celebration <rarity> [modifier]
+// 
+// Examples:
+//   /scriptevent sq:test_celebration common
+//   /scriptevent sq:test_celebration rare
+//   /scriptevent sq:test_celebration legendary
+//   /scriptevent sq:test_celebration mythic
+//   /scriptevent sq:test_celebration legendary jackpot
+//   /scriptevent sq:test_celebration rare streak
+//   /scriptevent sq:test_celebration mythic jackpot
+// ============================================================================
+system.afterEvents.scriptEventReceive.subscribe((event) => {
+  if (event.id !== "sq:test_celebration") return;
+
+  const player = event.sourceEntity;
+  if (!player || player.typeId !== "minecraft:player") {
+    console.warn("[Celebration] Test command must be run by a player");
+    return;
+  }
+
+  const args = event.message.split(" ");
+  const rarity = args[0] || "common";
+  const modifier = args[1] || null;
+  
+  // Validate rarity
+  const validRarities = ["common", "rare", "legendary", "mythic"];
+  if (!validRarities.includes(rarity)) {
+    player.sendMessage(`§cInvalid rarity: ${rarity}. Use: common, rare, legendary, or mythic`);
+    return;
+  }
+  
+  // SP amounts per rarity for testing
+  const spAmounts = { common: 25, rare: 75, legendary: 200, mythic: 500 };
+  
+  celebrateQuestComplete(player, {
+    rarity: rarity,
+    spAmount: spAmounts[rarity],
+    isJackpot: modifier === "jackpot",
+    streakLabel: modifier === "streak" ? "3-Quest Streak!" : null
+  });
+  
+  player.sendMessage(`§aTesting §e${rarity}§a celebration${modifier ? ` with §e${modifier}` : ""}`);
+});
+
+// ============================================================================
+// PHASE 3: SP COUNT-UP ANIMATION - Test Commands
+// ============================================================================
+// Test commands for the SP count-up animation system
+// Usage: /scriptevent sq:test_countup [amount]
+// Usage: /scriptevent sq:test_instant [value]
+// Usage: /scriptevent sq:test_rapid
+// ============================================================================
+
+// Test SP count-up animation with various amounts
+system.afterEvents.scriptEventReceive.subscribe((event) => {
+  if (event.id !== "sq:test_countup") return;
+
+  const player = event.sourceEntity;
+  if (!player || player.typeId !== "minecraft:player") {
+    console.warn("[SPAnimator] Test command must be run by a player");
+    return;
+  }
+
+  const amount = parseInt(event.message) || 50;
+  const currentSP = getSP(player);
+  
+  // Simulate gaining SP with animation
+  SPAnimator.animateCountUp(
+    player,
+    currentSP,
+    currentSP + amount,
+    sendSPDisplayValue
+  );
+  
+  player.sendMessage(`§aTesting count-up animation: §e${currentSP} → ${currentSP + amount}`);
+});
+
+// Test instant display (no animation)
+system.afterEvents.scriptEventReceive.subscribe((event) => {
+  if (event.id !== "sq:test_instant") return;
+
+  const player = event.sourceEntity;
+  if (!player || player.typeId !== "minecraft:player") {
+    console.warn("[SPAnimator] Test command must be run by a player");
+    return;
+  }
+
+  const value = parseInt(event.message) || 9999;
+  sendSPDisplayValue(player, value);
+  player.sendMessage(`§aSet display to §e${value}§a instantly (no animation)`);
+});
+
+// Test rapid SP gains (interrupt handling)
+system.afterEvents.scriptEventReceive.subscribe((event) => {
+  if (event.id !== "sq:test_rapid") return;
+
+  const player = event.sourceEntity;
+  if (!player || player.typeId !== "minecraft:player") {
+    console.warn("[SPAnimator] Test command must be run by a player");
+    return;
+  }
+
+  const base = getSP(player);
+  
+  player.sendMessage("§aTesting rapid gains (interrupt handling)...");
+  
+  // Fire three SP gains in quick succession
+  SPAnimator.animateCountUp(player, base, base + 25, sendSPDisplayValue);
+  
+  system.runTimeout(() => {
+    SPAnimator.animateCountUp(player, base + 25, base + 75, sendSPDisplayValue);
+  }, 10);
+  
+  system.runTimeout(() => {
+    SPAnimator.animateCountUp(player, base + 75, base + 150, sendSPDisplayValue);
+  }, 20);
 });
 
 // ============================================================================

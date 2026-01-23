@@ -1,10 +1,18 @@
 # Celebration System — Phase 2: Rarity-Scaled Quest Celebrations
 
+**Status:** ✅ **COMPLETE** - Implemented January 22, 2026
+
 ## 🎯 Objective
 
 Upgrade quest turn-in celebrations to scale with rarity. Common quests get a satisfying acknowledgment; Mythic quests get an epic show with spiraling particles, fireworks, and layered audio.
 
 **Prerequisite:** Phase 1 must be complete (CelebrationManager.js exists and basic SP feedback works).
+
+---
+
+## ⚠️ CRITICAL IMPLEMENTATION NOTE
+
+**Action Bar vs Title Cards:** This system uses `setActionBar()` instead of `setTitle()` for reward notifications because the SP display system uses `titleraw` to send "SPVAL:XX" to the JSON UI HUD. Using `setTitle()` would override the SP coin display in the upper right corner.
 
 ---
 
@@ -29,14 +37,37 @@ packs/QuestSystemRP/
 
 ## 📦 Step 1: Expand CelebrationManager.js
 
-**Replace the entire contents of `CelebrationManager.js`** with this expanded version:
+**⚠️ CRITICAL:** This step adds Phase 2 code AFTER the Phase 1 code. **DO NOT REPLACE** the existing `celebrateSPGain()` function or `spGain` config. Preserve them exactly as-is.
+
+**Your current Phase 1 setup is LOCKED:**
+```javascript
+// THIS STAYS EXACTLY AS-IS:
+const CELEBRATION_CONFIG = {
+    spGain: {
+        minAmountForEffect: 1,
+        particleCount: 100,          // 9 waves × 100 = 900 lava particles
+        particleSpread: 2.5,
+        particleHeight: 1.5,
+        particleType: "minecraft:lava_particle",  // Golden embers - DO NOT CHANGE
+        soundVolume: 0.6,
+    },
+    // ← ADD questComplete configs HERE (below spGain)
+};
+
+// THIS STAYS EXACTLY AS-IS:
+export function celebrateSPGain(player, amount) {
+    // ... (9 burst loop, 2 tick spacing) DO NOT TOUCH
+}
+```
+
+**What to add:** Insert the new `questComplete` object in CELEBRATION_CONFIG and implement the new functions below. Here's the code to ADD (not replace):
 
 ```javascript
 /**
  * CelebrationManager.js
  * Centralized utility for triggering celebrations throughout SuperQuester.
  * 
- * Phase 1: Basic SP gain feedback ✓
+ * Phase 1: Basic SP gain feedback ✓ (LOCKED - DO NOT MODIFY)
  * Phase 2: Rarity-scaled quest completion celebrations
  */
 
@@ -47,8 +78,17 @@ import { world, system } from "@minecraft/server";
 // ============================================
 
 const CELEBRATION_CONFIG = {
-    // Rarity-based scaling for quest turn-in celebrations
-    questComplete: {
+    // *** PHASE 1: DO NOT MODIFY - Rapid lava burst with 9 waves ***
+    spGain: {
+        minAmountForEffect: 1,
+        particleCount: 100,          // 9 waves × 100 = 900 total particles
+        particleSpread: 2.5,         // horizontal spread
+        particleHeight: 1.5,         // vertical spread
+        particleType: "minecraft:lava_particle",  // Golden embers
+        soundVolume: 0.6,
+    },
+    
+    // *** PHASE 2: NEW - Quest completion by rarity ***
         common: {
             particleCount: 4,
             particleType: "minecraft:villager_happy",
@@ -88,17 +128,9 @@ const CELEBRATION_CONFIG = {
             spawnFirework: true,
         }
     },
-    
-    // Generic SP gain feedback (subtle, frequent)
-    spGain: {
-        minAmountForEffect: 1,
-        particleCount: 3,
-        particleType: "minecraft:villager_happy",
-        soundVolume: 0.6,
-    },
-    
-    // Jackpot overlay settings
-    jackpot: {
+
+// Jackpot overlay settings
+jackpot: {
         extraParticles: 15,
         extraDurationTicks: 20,
     },
@@ -115,7 +147,7 @@ const CELEBRATION_CONFIG = {
 
 /**
  * Trigger celebration for quest turn-in.
- * This is the main celebration entry point.
+ * This is the main celebration entry point for PHASE 2.
  * 
  * @param {Player} player - The player who completed the quest
  * @param {Object} options - Celebration context
@@ -150,9 +182,19 @@ export function celebrateQuestComplete(player, options) {
     }
 }
 
+// ============================================================================
+// PHASE 1 LOCKED SECTION - DO NOT MODIFY
+// ============================================================================
+// The celebrateSPGain() function below remains unchanged from Phase 1.
+// It uses rapid lava particle bursts (9 waves × 100 particles) and is called
+// whenever SP is gained. DO NOT ALTER THIS FUNCTION OR ITS CONFIG.
+// ============================================================================
+
 /**
  * Trigger subtle feedback for any SP gain.
  * Called from modifySP() - should be lightweight.
+ * 
+ * PHASE 1 LOCKED - DO NOT MODIFY
  * 
  * @param {Player} player - The player gaining SP
  * @param {number} amount - SP amount gained (positive)
@@ -164,23 +206,32 @@ export function celebrateSPGain(player, amount) {
     const pos = player.location;
     const dim = player.dimension;
     
-    // Small particle burst at player position
-    for (let i = 0; i < config.particleCount; i++) {
-        const offset = {
-            x: pos.x + (Math.random() - 0.5) * 1.5,
-            y: pos.y + 1 + Math.random() * 0.5,
-            z: pos.z + (Math.random() - 0.5) * 1.5
-        };
-        dim.spawnParticle(config.particleType, offset);
+    // Spawn particles in rapid bursts to create continuous rising effect
+    // New particles spawn before old ones turn to ash, hiding the ash phase
+    for (let burst = 0; burst < 9; burst++) {
+        system.runTimeout(() => {
+            for (let i = 0; i < config.particleCount; i++) {
+                const offset = {
+                    x: pos.x + (Math.random() - 0.5) * config.particleSpread,
+                    y: pos.y + 1 + Math.random() * config.particleHeight,
+                    z: pos.z + (Math.random() - 0.5) * config.particleSpread
+                };
+                dim.spawnParticle(config.particleType, offset);
+            }
+        }, burst * 2);  // Burst every 2 ticks for 18 ticks total
     }
     
-    // Coin sound (random variant)
+    // Coin sound (random variant for variety)
     const variant = Math.floor(Math.random() * 3) + 1;
     player.playSound(`celebration.coin_clink_${variant}`, { 
         volume: config.soundVolume, 
         pitch: 0.9 + Math.random() * 0.2
     });
 }
+
+// ============================================================================
+// PHASE 2 IMPLEMENTATION - Helper Functions Below
+// ============================================================================
 
 // ============================================
 // PARTICLE PATTERNS (PRIVATE)
@@ -323,15 +374,23 @@ function playCompletionSounds(player, config, rarity) {
 // ============================================
 
 /**
- * Show floating SP reward title.
+ * Show floating SP reward via action bar (doesn't interfere with SP HUD display).
+ * 
+ * CRITICAL: We use action bar instead of setTitle() because the SP display system
+ * uses titleraw to send "SPVAL:XX" to the JSON UI. Using setTitle() would override
+ * the SP display in the upper right corner.
  */
 function showRewardTitle(player, spAmount, colorCode) {
-    player.onScreenDisplay.setTitle(`${colorCode}+${spAmount} SP`, {
-        subtitle: "§7Quest Complete!",
-        fadeInDuration: 5,
-        stayDuration: 30,
-        fadeOutDuration: 10
-    });
+    // Format reward with color and subtitle-style text
+    const rewardText = `${colorCode}+${spAmount} SP §7Quest Complete!§r`;
+    
+    // Show in action bar (stays for 1.5 seconds = 30 ticks)
+    player.onScreenDisplay.setActionBar(rewardText);
+    
+    // Clear after duration to avoid blocking other action bar messages
+    system.runTimeout(() => {
+        player.onScreenDisplay.setActionBar("");
+    }, 30);
 }
 
 // ============================================
@@ -379,25 +438,15 @@ function overlayJackpotCelebration(player) {
     system.runTimeout(() => {
         for (let i = 0; i < config.extraParticles; i++) {
             dim.spawnParticle("minecraft:totem_particle", {
-                x: pos.x + (Math.random() - 0.5) * 3,
-                y: pos.y + 1 + Math.random() * 2,
-                z: pos.z + (Math.random() - 0.5) * 3
-            });
-        }
         
-        // Jackpot sound
-        player.playSound("celebration.jackpot", { volume: 1.0 });
+        // Jackpot message in action bar (doesn't interfere with SP display)
+        player.onScreenDisplay.setActionBar("§6§l✦ JACKPOT! ✦§r");
+        
+        // Clear after 2 seconds
+        system.runTimeout(() => {
+            player.onScreenDisplay.setActionBar("");
+        }, 40);
     }, 20);
-    
-    // Jackpot title overlay (after main title fades slightly)
-    system.runTimeout(() => {
-        player.onScreenDisplay.setTitle("§6§l✦ JACKPOT! ✦", {
-            subtitle: "",
-            fadeInDuration: 0,
-            stayDuration: 40,
-            fadeOutDuration: 10
-        });
-    }, 45);
 }
 
 /**
@@ -408,6 +457,14 @@ function overlayStreakCelebration(player, streakLabel) {
     
     system.runTimeout(() => {
         player.playSound("celebration.streak", { volume: 0.8 });
+        
+        // Show streak in action bar (doesn't interfere with SP display)
+        player.onScreenDisplay.setActionBar(`§a${streakLabel}§r`);
+        
+        // Clear after 1.5 seconds
+        system.runTimeout(() => {
+            player.onScreenDisplay.setActionBar("");
+        }, 30layer.playSound("celebration.streak", { volume: 0.8 });
         
         // Brief subtitle update showing streak
         player.onScreenDisplay.setTitle("", {
