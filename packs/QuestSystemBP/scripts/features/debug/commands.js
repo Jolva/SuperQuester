@@ -77,6 +77,93 @@ export function handleRegisterNamesCommand(ev, deps) {
   });
 }
 
+/**
+ * Handles the !leaderboardids command - lists unknown leaderboard entries.
+ * 
+ * @param {Object} ev - MessageCreate event
+ * @param {Object} deps - Dependencies object containing:
+ *   - getUnknownLeaderboardEntries: Function to list unknown entries
+ *   - system: Minecraft system API
+ */
+export function handleListUnknownLeaderboardCommand(ev, deps) {
+  const { getUnknownLeaderboardEntries, system } = deps;
+  ev.cancel = true;
+
+  system.run(() => {
+    const { entries, missingObjective } = getUnknownLeaderboardEntries();
+    if (missingObjective) {
+      ev.sender.sendMessage("§cLeaderboard objective missing.§r");
+      return;
+    }
+
+    if (!entries.length) {
+      ev.sender.sendMessage("§aNo unknown leaderboard entries found.§r");
+      return;
+    }
+
+    ev.sender.sendMessage("§eUnknown leaderboard entries (ID / Score):§r");
+    for (const entry of entries) {
+      ev.sender.sendMessage(`§7${entry.id}§r §f/ ${entry.score}§r`);
+    }
+    ev.sender.sendMessage("§7Use: !setleaderboardname <id> <name>§r");
+  });
+}
+
+/**
+ * Handles the !setleaderboardname command - sets a name for a leaderboard ID.
+ * 
+ * @param {Object} ev - MessageCreate event
+ * @param {Object} deps - Dependencies object containing:
+ *   - setPlayerNameRegistryEntry: Function to set registry mapping
+ *   - system: Minecraft system API
+ */
+export function handleSetLeaderboardNameCommand(ev, deps) {
+  const { setPlayerNameRegistryEntry, system } = deps;
+  ev.cancel = true;
+
+  const parts = ev.message.trim().split(/\s+/);
+  if (parts.length < 3) {
+    system.run(() => ev.sender.sendMessage("§cUsage: !setleaderboardname <id> <name>§r"));
+    return;
+  }
+
+  const [, id, ...nameParts] = parts;
+  const name = nameParts.join(" ").trim();
+
+  if (!id || !name) {
+    system.run(() => ev.sender.sendMessage("§cUsage: !setleaderboardname <id> <name>§r"));
+    return;
+  }
+
+  system.run(() => {
+    setPlayerNameRegistryEntry(id, name);
+    ev.sender.sendMessage(`§aMapped leaderboard ID ${id} → ${name}§r`);
+  });
+}
+
+/**
+ * Handles the !pruneleaderboardunknowns command - removes unknown entries with 0 score.
+ * 
+ * @param {Object} ev - MessageCreate event
+ * @param {Object} deps - Dependencies object containing:
+ *   - pruneUnknownZeroScoreEntries: Function to prune unknown zero-score entries
+ *   - system: Minecraft system API
+ */
+export function handlePruneUnknownLeaderboardCommand(ev, deps) {
+  const { pruneUnknownZeroScoreEntries, system } = deps;
+  ev.cancel = true;
+
+  system.run(() => {
+    const { removed, missingObjective } = pruneUnknownZeroScoreEntries();
+    if (missingObjective) {
+      ev.sender.sendMessage("§cLeaderboard objective missing.§r");
+      return;
+    }
+
+    ev.sender.sendMessage(`§aPruned ${removed} unknown leaderboard entr${removed === 1 ? "y" : "ies"} with 0 score.§r`);
+  });
+}
+
 // =============================================================================
 // ADMIN COMMANDS
 // =============================================================================

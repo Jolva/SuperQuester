@@ -72,6 +72,16 @@ Give SP to another player.
 
 ---
 
+**Clear Leaderboard (Admin)**
+```
+/scriptevent sq:clearleaderboard
+```
+Clears all SuperPoints leaderboard entries.
+
+**Use Case:** Reset the leaderboard without deleting other player data.
+
+---
+
 ### Builder Mode
 
 **Toggle Builder Mode**
@@ -101,6 +111,36 @@ Forces the daily quest refresh, generating new quests in all available slots.
 Registers all online player names to the persistent registry.
 
 **Use Case:** Fixes "Unknown Player" issue on leaderboards when players join for the first time.
+
+---
+
+**List Unknown Leaderboard IDs**
+```
+!leaderboardids
+```
+Lists unknown leaderboard entries with their ID and score.
+
+**Use Case:** Identify historical unknown entries so they can be mapped.
+
+---
+
+**Set Leaderboard Name**
+```
+!setleaderboardname <id> <name>
+```
+Manually maps a leaderboard participant ID to a player name.
+
+**Use Case:** Fix historical unknown entries without resetting scores.
+
+---
+
+**Prune Unknown Zero-Score Entries**
+```
+!pruneleaderboardunknowns
+```
+Removes leaderboard entries that resolve to Unknown Player and have 0 score.
+
+**Use Case:** Clean up stale zero-score placeholders without wiping real player data.
 
 ---
 

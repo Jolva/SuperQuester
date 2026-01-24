@@ -104,7 +104,10 @@ import {
   registerPlayerName,
   lookupPlayerName,
   getLeaderboardEntries,
-  showLeaderboardTab
+  showLeaderboardTab,
+  getUnknownLeaderboardEntries,
+  setPlayerNameRegistryEntry,
+  pruneUnknownZeroScoreEntries
 } from "./features/leaderboard/leaderboardService.js";
 
 // Quest Board UI and routing
@@ -141,12 +144,16 @@ import {
 // Ambient systems
 import { initializeTownMusicLoop } from "./features/ambient/music.js";
 import { initializeDogBarkingLoop, initializeCatSquadLoop } from "./features/ambient/atmosphericSounds.js";
+import { registerChatCommands } from "./features/debug/chatCommands.js";
 
 // Debug commands
 import {
   handleBuilderCommand,
   handleForceDailyCommand,
   handleRegisterNamesCommand,
+  handleListUnknownLeaderboardCommand,
+  handleSetLeaderboardNameCommand,
+  handlePruneUnknownLeaderboardCommand,
   handleAdminGiveSP as handleAdminGiveSPBase
 } from "./features/debug/commands.js";
 
@@ -1145,369 +1152,31 @@ function wireInteractions() {
     });
   }
 
-  // Chat fallback
-  const chatEvent = world.beforeEvents?.chatSend;
-  if (chatEvent?.subscribe) {
-    chatEvent.subscribe((ev) => {
-      // Safe Zone Commands (!safezone on/off/status)
-      if (ev.message.startsWith("!safezone")) {
-        handleSafeZoneCommand(ev);
-        return;
-      }
-
-      if (ev.message === "!builder") {
-        const deps = { builderModePlayers, system };
-        handleBuilderCommand(ev, deps);
-        return;
-      }
-
-      if (ev.message === FALLBACK_COMMAND) {
-        ev.cancel = true;
-        system.run(() => showQuestBoard(ev.sender));
-      }
-
-      // DEBUG: Force Daily Reset
-      if (ev.message === "!forcedaily") {
-        const deps = { ensureQuestData, PersistenceManager, system };
-        handleForceDailyCommand(ev, deps);
-      }
-
-      // DEBUG: Register all online player names for leaderboard
-      if (ev.message === "!registernames") {
-        const deps = { world, registerPlayerName, system };
-        handleRegisterNamesCommand(ev, deps);
-      }
-
-      // ========================================================================
-      // PHASE 1 TESTING COMMANDS: Encounter System Validation
-      // ========================================================================
-      // These commands test the encounter data layer before mob spawning is added.
-      // Test the encounter table, quest generation, and data integrity.
-      //
-      // Available commands:
-      // - !encounter test table: Show encounter counts by tier
-      // - !encounter test generate rare: Generate and display a rare encounter quest
-      // - !encounter test generate legendary: Generate and display a legendary encounter quest
-      // ========================================================================
-
-      // Test: Encounter table validation
-      if (ev.message === "!encounter test table") {
-        ev.cancel = true;
-        system.run(async () => {
-          try {
-            const { getEncountersByTier, ENCOUNTER_TABLE } = await import("./data/EncounterTable.js");
-            ev.sender.sendMessage(`§a=== Encounter Table Status ===`);
-            ev.sender.sendMessage(`§fTotal encounters: §e${ENCOUNTER_TABLE.length}`);
-            ev.sender.sendMessage(`§fRare encounters: §e${getEncountersByTier("rare").length}`);
-            ev.sender.sendMessage(`§fLegendary encounters: §6${getEncountersByTier("legendary").length}`);
-            ev.sender.sendMessage(`§7Use !encounter test generate <tier> to test generation`);
-          } catch (error) {
-            ev.sender.sendMessage(`§cError loading encounter table: ${error.message}`);
-            console.error("[EncounterTest] Table load failed:", error);
-          }
-        });
-      }
-
-      // Test: Generate rare encounter quest
-      if (ev.message === "!encounter test generate rare") {
-        ev.cancel = true;
-        system.run(async () => {
-          try {
-            const { generateEncounterQuest } = await import("./systems/EncounterManager.js");
-            const quest = generateEncounterQuest("rare");
-
-            if (quest) {
-              ev.sender.sendMessage(`§a=== Rare Encounter Generated ===`);
-              ev.sender.sendMessage(`§fName: §e${quest.encounterName}`);
-              ev.sender.sendMessage(`§fID: §7${quest.id}`);
-              ev.sender.sendMessage(`§fMobs: §e${quest.totalMobCount}`);
-              ev.sender.sendMessage(`§fSP Reward: §e${quest.reward.scoreboardIncrement}`);
-              ev.sender.sendMessage(`§fItem Reward: §e${quest.reward.rewardItems[0]?.amount || 0}x ${quest.reward.rewardItems[0]?.typeId || "none"}`);
-              ev.sender.sendMessage(`§fType: §7${quest.type}`);
-              ev.sender.sendMessage(`§fisEncounter: §7${quest.isEncounter}`);
-            } else {
-              ev.sender.sendMessage(`§cFailed to generate rare encounter`);
-            }
-          } catch (error) {
-            ev.sender.sendMessage(`§cError generating encounter: ${error.message}`);
-            console.error("[EncounterTest] Generation failed:", error);
-          }
-        });
-      }
-
-      // Test: Generate legendary encounter quest
-      if (ev.message === "!encounter test generate legendary") {
-        ev.cancel = true;
-        system.run(async () => {
-          try {
-            const { generateEncounterQuest } = await import("./systems/EncounterManager.js");
-            const quest = generateEncounterQuest("legendary");
-
-            if (quest) {
-              ev.sender.sendMessage(`§6=== Legendary Encounter Generated ===`);
-              ev.sender.sendMessage(`§fName: §6${quest.encounterName}`);
-              ev.sender.sendMessage(`§fID: §7${quest.id}`);
-              ev.sender.sendMessage(`§fMobs: §6${quest.totalMobCount}`);
-              ev.sender.sendMessage(`§fSP Reward: §6${quest.reward.scoreboardIncrement}`);
-              ev.sender.sendMessage(`§fItem Reward: §6${quest.reward.rewardItems[0]?.amount || 0}x ${quest.reward.rewardItems[0]?.typeId || "none"}`);
-              ev.sender.sendMessage(`§fType: §7${quest.type}`);
-              ev.sender.sendMessage(`§fisEncounter: §7${quest.isEncounter}`);
-            } else {
-              ev.sender.sendMessage(`§cFailed to generate legendary encounter`);
-            }
-          } catch (error) {
-            ev.sender.sendMessage(`§cError generating encounter: ${error.message}`);
-            console.error("[EncounterTest] Generation failed:", error);
-          }
-        });
-      }
-
-      // ========================================================================
-      // PHASE 3 TESTING COMMANDS: Zone & Proximity Debugging
-      // ========================================================================
-      // !encounter zone info - Show current zone details and distance
-      // !encounter tp zone - Teleport to zone center
-      // ========================================================================
-
-      // Show encounter zone information
-      if (ev.message === "!encounter zone info") {
-        ev.cancel = true;
-        system.run(() => {
-          const questData = ensureQuestData(ev.sender);
-
-          if (!questData?.active?.isEncounter) {
-            ev.sender.sendMessage(`§cNo active encounter quest.`);
-            return;
-          }
-
-          const quest = questData.active;
-          const zone = quest.encounterZone;
-
-          ev.sender.sendMessage(`§e=== Encounter Zone Info ===`);
-          ev.sender.sendMessage(`§fName: §e${quest.encounterName}`);
-          ev.sender.sendMessage(`§fState: §7${quest.encounterState}`);
-
-          if (zone) {
-            ev.sender.sendMessage(`§fZone center: §7${zone.center.x}, ${zone.center.z}`);
-            ev.sender.sendMessage(`§fTrigger radius: §7${zone.radius} blocks`);
-
-            const dist = calculateDistance(ev.sender.location, zone.center);
-            ev.sender.sendMessage(`§fYour distance: §e${dist} blocks`);
-
-            if (dist <= zone.radius) {
-              ev.sender.sendMessage(`§aYou are INSIDE the zone!`);
-            } else {
-              ev.sender.sendMessage(`§7${dist - zone.radius} blocks until zone entry`);
-            }
-          } else {
-            ev.sender.sendMessage(`§cNo zone assigned (unexpected)`);
-          }
-
-          if (quest.spawnData) {
-            const loc = quest.spawnData.location;
-            ev.sender.sendMessage(`§fSpawn location: §7${loc.x}, ${loc.y}, ${loc.z}`);
-          }
-        });
-      }
-
-      // Teleport to zone center
-      if (ev.message === "!encounter tp zone") {
-        ev.cancel = true;
-        system.run(() => {
-          const questData = ensureQuestData(ev.sender);
-
-          if (!questData?.active?.isEncounter || !questData.active.encounterZone) {
-            ev.sender.sendMessage(`§cNo active encounter with zone.`);
-            return;
-          }
-
-          const zone = questData.active.encounterZone;
-          // Teleport high to avoid spawning inside terrain
-          ev.sender.teleport({ x: zone.center.x, y: 100, z: zone.center.z });
-          ev.sender.sendMessage(`§aTeleported to zone center (high altitude)`);
-          ev.sender.sendMessage(`§7Zone: ${zone.center.x}, ${zone.center.z}`);
-        });
-      }
-
-      // Teleport to spawn location (if mobs have spawned)
-      if (ev.message === "!encounter tp spawn") {
-        ev.cancel = true;
-        system.run(() => {
-          const questData = ensureQuestData(ev.sender);
-
-          if (!questData?.active?.isEncounter) {
-            ev.sender.sendMessage(`§cNo active encounter quest.`);
-            return;
-          }
-
-          if (!questData.active.spawnData || !questData.active.spawnData.location) {
-            ev.sender.sendMessage(`§cMobs haven't spawned yet. Travel to the zone first.`);
-            return;
-          }
-
-          const loc = questData.active.spawnData.location;
-          ev.sender.teleport({ x: loc.x, y: loc.y + 1, z: loc.z });
-          ev.sender.sendMessage(`§aTeleported to spawn location: ${loc.x}, ${loc.y}, ${loc.z}`);
-        });
-      }
-
-      // === PHASE 4: Debug commands for logout/login persistence testing ===
-
-      // Simulate logout - despawns mobs without actually leaving
-      if (ev.message === "!encounter test logout") {
-        ev.cancel = true;
-        system.run(() => {
-          const questData = ensureQuestData(ev.sender);
-
-          if (!questData?.active?.isEncounter) {
-            ev.sender.sendMessage(`§cNo active encounter`);
-            return;
-          }
-
-          const quest = questData.active;
-          ev.sender.sendMessage(`§e=== Simulating Logout ===`);
-          ev.sender.sendMessage(`§fState: ${quest.encounterState}`);
-
-          if (quest.encounterState === "spawned" && quest.spawnData) {
-            const dimension = ev.sender.dimension;
-            const despawnCount = despawnEncounterMobs(quest.id, dimension);
-            quest.spawnData.spawnedEntityIds = [];
-            PersistenceManager.saveQuestData(ev.sender, questData);
-            ev.sender.sendMessage(`§aDespawned ${despawnCount} mobs`);
-          } else {
-            ev.sender.sendMessage(`§7No mobs to despawn (state: ${quest.encounterState})`);
-          }
-          ev.sender.sendMessage(`§7Use !encounter test login to simulate login`);
-        });
-      }
-
-      // Simulate login - respawns remaining mobs
-      if (ev.message === "!encounter test login") {
-        ev.cancel = true;
-        system.run(() => {
-          const questData = ensureQuestData(ev.sender);
-
-          if (!questData?.active?.isEncounter) {
-            ev.sender.sendMessage(`§cNo active encounter`);
-            return;
-          }
-
-          const quest = questData.active;
-          const progress = questData.progress || 0;
-
-          ev.sender.sendMessage(`§e=== Simulating Login ===`);
-          ev.sender.sendMessage(`§fState: ${quest.encounterState}`);
-          ev.sender.sendMessage(`§fProgress: ${progress}/${quest.totalMobCount}`);
-
-          if (quest.encounterState === "spawned" && quest.spawnData?.location) {
-            const remaining = quest.totalMobCount - progress;
-
-            if (remaining > 0) {
-              const dimension = ev.sender.dimension;
-              const entityIds = respawnRemainingMobs(quest, progress, dimension);
-              quest.spawnData.spawnedEntityIds = entityIds;
-              PersistenceManager.saveQuestData(ev.sender, questData);
-              ev.sender.sendMessage(`§aRespawned ${entityIds.length} mobs`);
-            } else {
-              ev.sender.sendMessage(`§aNo mobs to respawn - encounter complete`);
-            }
-          } else if (quest.encounterState === "pending") {
-            ev.sender.sendMessage(`§7Encounter pending - travel to zone first`);
-          } else {
-            ev.sender.sendMessage(`§7Encounter complete - return to board`);
-          }
-        });
-      }
-
-      // Show full encounter state details
-      if (ev.message === "!encounter state") {
-        ev.cancel = true;
-        system.run(() => {
-          const questData = ensureQuestData(ev.sender);
-
-          if (!questData?.active?.isEncounter) {
-            ev.sender.sendMessage(`§cNo active encounter`);
-            return;
-          }
-
-          const quest = questData.active;
-          const progress = questData.progress || 0;
-
-          ev.sender.sendMessage(`§e=== Encounter State ===`);
-          ev.sender.sendMessage(`§fName: ${quest.encounterName}`);
-          ev.sender.sendMessage(`§fState: ${quest.encounterState}`);
-          ev.sender.sendMessage(`§fProgress: ${progress}/${quest.totalMobCount}`);
-
-          if (quest.encounterZone) {
-            ev.sender.sendMessage(`§fZone: ${quest.encounterZone.center.x}, ${quest.encounterZone.center.z}`);
-          }
-          if (quest.spawnData?.location) {
-            const loc = quest.spawnData.location;
-            ev.sender.sendMessage(`§fSpawn: ${Math.floor(loc.x)}, ${Math.floor(loc.y)}, ${Math.floor(loc.z)}`);
-            ev.sender.sendMessage(`§fEntity IDs stored: ${quest.spawnData.spawnedEntityIds?.length || 0}`);
-
-            // Count ACTUAL mobs still alive in the world
-            const actualCount = countRemainingMobs(quest.id, ev.sender.dimension);
-            ev.sender.sendMessage(`§fActual mobs alive: §c${actualCount}`);
-          }
-        });
-      }
-
-      // ========================================================================
-      // === PHASE 5: Navigation & Cleanup Debug Commands ===
-      // ========================================================================
-
-      // Test directional arrow calculation
-      if (ev.message === "!nav test arrow") {
-        ev.cancel = true;
-        system.run(() => {
-          const questData = ensureQuestData(ev.sender);
-
-          if (!questData?.active?.isEncounter) {
-            ev.sender.sendMessage(`§cNo active encounter`);
-            return;
-          }
-
-          const quest = questData.active;
-          let target = quest.encounterState === "pending"
-            ? quest.encounterZone?.center
-            : quest.spawnData?.location;
-
-          if (target) {
-            const playerPos = ev.sender.location;
-            const dx = target.x - playerPos.x;
-            const dz = target.z - playerPos.z;
-            const targetAngle = Math.atan2(-dx, -dz) * (180 / Math.PI);
-            const playerYaw = ev.sender.getRotation().y;
-            let relativeAngle = targetAngle - playerYaw;
-            while (relativeAngle > 180) relativeAngle -= 360;
-            while (relativeAngle < -180) relativeAngle += 360;
-
-            const distance = Math.floor(calculateDistance(playerPos, target));
-            ev.sender.sendMessage(`§e=== Navigation Debug ===`);
-            ev.sender.sendMessage(`§fTarget: ${Math.floor(target.x)}, ${Math.floor(target.z)}`);
-            ev.sender.sendMessage(`§fDistance: ${distance}m`);
-            ev.sender.sendMessage(`§fPlayer facing: ${playerYaw.toFixed(1)}°`);
-            ev.sender.sendMessage(`§fTarget angle: ${targetAngle.toFixed(1)}°`);
-            ev.sender.sendMessage(`§fRelative angle: ${relativeAngle.toFixed(1)}°`);
-          } else {
-            ev.sender.sendMessage(`§cNo target location available`);
-          }
-        });
-      }
-
-      // Force orphan cleanup
-      if (ev.message === "!encounter cleanup") {
-        ev.cancel = true;
-        system.run(() => {
-          const count = cleanupOrphanedMobs(ensureQuestData);
-          ev.sender.sendMessage(`§aCleaned up ${count} orphaned mobs`);
-        });
-      }
-
-      // === END PHASE 5 DEBUG COMMANDS ===
-    });
-  }
+  registerChatCommands({
+    world,
+    system,
+    FALLBACK_COMMAND,
+    builderModePlayers,
+    showQuestBoard,
+    handleSafeZoneCommand,
+    handleBuilderCommand,
+    handleForceDailyCommand,
+    handleRegisterNamesCommand,
+    handleListUnknownLeaderboardCommand,
+    handleSetLeaderboardNameCommand,
+    handlePruneUnknownLeaderboardCommand,
+    ensureQuestData,
+    PersistenceManager,
+    registerPlayerName,
+    getUnknownLeaderboardEntries,
+    setPlayerNameRegistryEntry,
+    pruneUnknownZeroScoreEntries,
+    calculateDistance,
+    respawnRemainingMobs,
+    despawnEncounterMobs,
+    countRemainingMobs,
+    cleanupOrphanedMobs
+  });
 }
 
 // =============================================================================
@@ -1702,6 +1371,33 @@ function handleAdminGiveSP(ev) {
   return handleAdminGiveSPBase(ev, deps);
 }
 
+/**
+ * Admin command: sq:clearleaderboard handler
+ */
+function handleAdminClearLeaderboard(ev) {
+  const source = ev.sourceEntity;
+  const objective = world.scoreboard.getObjective(SCOREBOARD_OBJECTIVE_ID);
+
+  if (!objective) {
+    source?.sendMessage?.("§cLeaderboard objective missing.§r");
+    return;
+  }
+
+  let removed = 0;
+  try {
+    for (const participant of objective.getParticipants()) {
+      objective.removeParticipant(participant);
+      removed++;
+    }
+  } catch (e) {
+    console.warn(`[Leaderboard] Failed to clear leaderboard: ${e}`);
+    source?.sendMessage?.("§cFailed to clear leaderboard. Check logs.§r");
+    return;
+  }
+
+  source?.sendMessage?.(`§aCleared leaderboard (${removed} entr${removed === 1 ? "y" : "ies"}).§r`);
+}
+
 // =============================================================================
 // BOOTSTRAP
 // =============================================================================
@@ -1730,6 +1426,7 @@ function bootstrap() {
       onBlockBreak: handleBlockBreak,
       onAtlasInteract: handleAtlasInteract,
       onAdminGiveSP: handleAdminGiveSP,
+      onAdminClearLeaderboard: handleAdminClearLeaderboard,
     },
     wireInteractions,
     wireEntityHitTracking

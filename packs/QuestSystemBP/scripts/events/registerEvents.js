@@ -117,6 +117,16 @@ export function registerEvents({ handlers, wireInteractions, wireEntityHitTracki
     }
   });
 
+  /**
+   * Admin command: sq:clearleaderboard
+   * Usage: /scriptevent sq:clearleaderboard
+   */
+  system.afterEvents.scriptEventReceive.subscribe((ev) => {
+    if (ev.id === "sq:clearleaderboard") {
+      handlers.onAdminClearLeaderboard(ev);
+    }
+  });
+
   // NOTE: Debug/testing commands (sq:test_*, sq:encounter, etc.) will be
   // moved to debug/commands.js in Phase 6. For now they remain in bootstrap.
 }

@@ -20,7 +20,7 @@ import { ActionFormData } from "@minecraft/server-ui";
 // =============================================================================
 
 const PLAYER_NAME_REGISTRY_KEY = "superquester:player_name_registry";
-const SCOREBOARD_OBJECTIVE_ID = "superpoints";
+const SCOREBOARD_OBJECTIVE_ID = "SuperPoints";
 const LEADERBOARD_ENTRY_LIMIT = 10;
 
 // =============================================================================
@@ -102,6 +102,92 @@ export function registerPlayerName(player) {
 export function lookupPlayerName(participantId) {
   const registry = loadPlayerNameRegistry();
   return registry[participantId.toString()] || null;
+}
+
+/**
+ * Manually sets a player name in the registry.
+ * Useful for fixing historical unknown entries.
+ * 
+ * @param {string|number} participantId - The scoreboard participant ID
+ * @param {string} name - The player name to map
+ */
+export function setPlayerNameRegistryEntry(participantId, name) {
+  if (!participantId || !name) return;
+  const registry = loadPlayerNameRegistry();
+  registry[participantId.toString()] = name;
+  savePlayerNameRegistry(registry);
+}
+
+/**
+ * Returns leaderboard entries that currently resolve to Unknown Player.
+ * 
+ * @returns {Object} { entries: Array, missingObjective: boolean }
+ */
+export function getUnknownLeaderboardEntries() {
+  const objective = world.scoreboard.getObjective(SCOREBOARD_OBJECTIVE_ID);
+  if (!objective) {
+    return { entries: [], missingObjective: true };
+  }
+
+  const participants = objective.getParticipants();
+  const unknowns = [];
+
+  for (const participant of participants) {
+    const score = objective.getScore(participant);
+    if (typeof score !== "number") continue;
+
+    const registryName = lookupPlayerName(participant.id);
+    if (registryName) continue;
+
+    const displayName = participant.displayName || participant.name || "";
+    if (displayName.includes("offlinePlayerName") || displayName.includes("commands.scoreboard")) {
+      unknowns.push({
+        id: participant.id.toString(),
+        score,
+        displayName
+      });
+    }
+  }
+
+  unknowns.sort((a, b) => b.score - a.score);
+
+  return { entries: unknowns, missingObjective: false };
+}
+
+/**
+ * Removes leaderboard participants that resolve to Unknown Player and have 0 score.
+ * 
+ * @returns {Object} { removed: number, missingObjective: boolean }
+ */
+export function pruneUnknownZeroScoreEntries() {
+  const objective = world.scoreboard.getObjective(SCOREBOARD_OBJECTIVE_ID);
+  if (!objective) {
+    return { removed: 0, missingObjective: true };
+  }
+
+  const participants = objective.getParticipants();
+  let removed = 0;
+
+  for (const participant of participants) {
+    const score = objective.getScore(participant);
+    if (typeof score !== "number" || score !== 0) continue;
+
+    const registryName = lookupPlayerName(participant.id);
+    if (registryName) continue;
+
+    const displayName = participant.displayName || participant.name || "";
+    const isUnknown = displayName.includes("offlinePlayerName") || displayName.includes("commands.scoreboard");
+    if (!isUnknown) continue;
+
+    try {
+      objective.removeParticipant(participant);
+      removed++;
+    } catch (e) {
+      console.warn(`[Leaderboard] Failed to remove participant ${participant.id}: ${e}`);
+    }
+  }
+
+  return { removed, missingObjective: false };
 }
 
 // =============================================================================
