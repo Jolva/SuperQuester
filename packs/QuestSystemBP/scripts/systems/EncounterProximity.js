@@ -138,6 +138,9 @@ let runIntervalId = null;
 // Track players currently being processed to avoid double-triggers
 const playersBeingProcessed = new Set();
 
+// Dependency injection - set by startProximityMonitoring
+let ensureQuestDataFn = null;
+
 // ============================================================================
 // NAVIGATION FUNCTIONS (Phase 5)
 // ============================================================================
@@ -322,12 +325,16 @@ function spawnBeaconParticles(dimension, target, fullBeam = true) {
 /**
  * Start the proximity monitoring system
  * Called once from world initialization
+ * @param {Function} ensureQuestData - Function to get quest data with caching
  */
-export function startProximityMonitoring() {
+export function startProximityMonitoring(ensureQuestData) {
   if (isRunning) {
     console.warn("[EncounterProximity] Already running");
     return;
   }
+
+  // Store the ensureQuestData function for use in proximity checks
+  ensureQuestDataFn = ensureQuestData;
 
   isRunning = true;
   console.log("[EncounterProximity] Started proximity monitoring");
@@ -384,9 +391,8 @@ function checkAllPlayers() {
  * @param {Player} player
  */
 function checkPlayerProximity(player) {
-  // Load quest data synchronously via ensureQuestData pattern
-  // Note: PersistenceManager.loadQuestData returns the data object directly
-  const questData = PersistenceManager.loadQuestData(player);
+  // Use ensureQuestData for cached data access
+  const questData = ensureQuestDataFn(player);
 
   // Early exit: No quest data
   if (!questData) return;

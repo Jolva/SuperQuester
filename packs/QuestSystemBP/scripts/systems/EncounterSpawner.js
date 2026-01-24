@@ -550,9 +550,10 @@ export function countRemainingMobs(questId, dimension) {
  * 2. For each mob, check if any online player has matching quest in spawned state
  * 3. Remove mobs with no matching active quest
  *
+ * @param {Function} ensureQuestDataFn - Function to get cached quest data
  * @returns {number} Number of mobs cleaned up
  */
-export function cleanupOrphanedMobs() {
+export function cleanupOrphanedMobs(ensureQuestDataFn) {
   const dimension = world.getDimension("overworld");
   let cleanedCount = 0;
 
@@ -579,7 +580,7 @@ export function cleanupOrphanedMobs() {
         let questFound = false;
         for (const player of world.getPlayers()) {
           try {
-            const questData = PersistenceManager.loadQuestData(player);
+            const questData = ensureQuestDataFn(player);
             if (questData?.active?.id === questId &&
                 questData.active.encounterState === "spawned") {
               questFound = true;

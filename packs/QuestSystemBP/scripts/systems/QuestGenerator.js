@@ -75,39 +75,24 @@ export class QuestGenerator {
   }
 
   static generateQuest() {
-    // 50/50 chance of Kill vs Gather/Mine
-    const isKill = Math.random() < 0.5;
-    let quest;
-
-    if (isKill) {
-      quest = this.generateKillQuest();
-    } else {
-      quest = this.generateGatherQuest();
-    }
-
-    // Roll rarity using weighted system from EconomyConfig
+    // Roll rarity first using weighted system from EconomyConfig
     const rarity = rollRarity();
 
     // ========================================================================
     // PHASE 1: ENCOUNTER SYSTEM INTEGRATION
     // ========================================================================
-    // Route Rare and Legendary quests to the encounter system instead of
-    // using standard kill/gather quests. This replaces random mob quests
-    // with curated encounter groups that spawn at ring-based distances.
+    // Route Rare, Legendary, and Mythic quests to the encounter system.
+    // Common quests are ALWAYS gather/mine quests.
     //
     // IMPACT:
-    // - Rare (22% chance): Now generates encounters instead of kill quests
-    // - Legendary (7% chance): Now generates encounters instead of kill quests
-    // - Mythic (1% chance): Now generates encounters instead of kill quests
-    // - Common (70%): UNCHANGED, bypass this block entirely
+    // - Common (70%): ALWAYS gather/mine quests (no kill quests)
+    // - Rare (22%): Encounter quests
+    // - Legendary (7%): Encounter quests
+    // - Mythic (1%): Encounter quests
     //
     // FALLBACK BEHAVIOR:
     // If encounter generation fails (shouldn't happen with valid data),
     // the code falls through to standard quest generation as a safety net.
-    //
-    // PHASE PROGRESSION:
-    // - Phase 1 (CURRENT): Quest generation only, no spawning
-    // - Phase 2+: Mob spawning, persistence, ring distances (future)
     // ========================================================================
     if (rarity === "rare" || rarity === "legendary" || rarity === "mythic") {
       const encounterQuest = generateEncounterQuest(rarity);
@@ -124,8 +109,8 @@ export class QuestGenerator {
     }
     // === END ENCOUNTER SYSTEM INTEGRATION ===
 
-    // Continue with original logic for Common/Mythic or fallback
-    quest.rarity = rarity;
+    // Common quests are ALWAYS gather/mine (no kill quests)
+    const quest = this.generateGatherQuest();
 
     // Calculate SP reward using new economy system
     const rewardCalc = calculateBaseQuestReward(

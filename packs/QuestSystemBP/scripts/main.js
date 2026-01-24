@@ -352,11 +352,11 @@ const BOARD_TABS = {
 
 // Wrapper functions to inject dependencies
 function getQuestIconWrapper(quest, showRarityBadge = false) {
-  return getQuestIcon(quest, showRarityBadge, TEXTURES, CATEGORY_TEXTURES);
+  return getQuestIconBase(quest, showRarityBadge, TEXTURES, CATEGORY_TEXTURES);
 }
 
 function getQuestColorsWrapper(rarity) {
-  return getQuestColors(rarity);
+  return getQuestColorsBase(rarity);
 }
 
 const LEADERBOARD_ENTRY_LIMIT = 10;
@@ -455,8 +455,8 @@ function modifySP(player, delta, options = {}) {
   // Update scoreboard
   objective.setScore(player, newBalance);
 
-  // Update backup in dynamic properties
-  const data = PersistenceManager.loadQuestData(player);
+  // Update backup in dynamic properties using cache
+  const data = ensureQuestData(player);
   if (data) {
     data.currentSP = newBalance;
     PersistenceManager.saveQuestData(player, data);
@@ -763,8 +763,8 @@ async function showQuestBoard(player, forcedTab = null, isStandalone = false, pl
     TWENTY_FOUR_HOURS_MS,
     ensureQuestData,
     calculateRerollPrice,
-    getQuestIcon,
-    getQuestColors,
+    getQuestIcon: getQuestIconWrapper,
+    getQuestColors: getQuestColorsWrapper,
     getPlayerTab,
     setPlayerTab,
     showLeaderboardTab,
@@ -781,7 +781,7 @@ async function showQuestBoard(player, forcedTab = null, isStandalone = false, pl
 async function handleUiAction(player, action) {
   const deps = {
     BOARD_TABS,
-    getQuestColors,
+    getQuestColors: getQuestColorsWrapper,
     handleRefresh,
     handleQuestAccept,
     handleQuestTurnIn,
@@ -874,7 +874,7 @@ function markQuestComplete(player, questState) {
   // This function is called when progress hits goal in events.
   player.onScreenDisplay?.setActionBar?.("§aQuest complete! Return to board.§r");
 
-  const colors = getQuestColors(questState.rarity);
+  const colors = getQuestColorsWrapper(questState.rarity);
   player.sendMessage(`§aQuest Complete: ${colors.chat}${questState.title}§r`);
   player.playSound("random.levelup");
   player.dimension.spawnParticle("minecraft:villager_happy", player.location);
@@ -939,8 +939,8 @@ function handleEntityDeath(ev) {
             markQuestComplete(player, questData.active);
           }
 
-          // Update HUD
-          updateQuestHud(player, { ...questData.active, progress: questData.progress, goal: questData.active.totalMobCount, status: "active" });
+          // HUD updates for encounter quests are handled by EncounterProximity
+          // No need to call updateQuestHud here
 
           // Save progress
           PersistenceManager.saveQuestData(player, questData);
@@ -1072,7 +1072,7 @@ function handleQuestTurnIn(player) {
     ItemStack,
     QuestGenerator,
     triggerQuestClearCelebration,
-    getQuestColors
+    getQuestColors: getQuestColorsWrapper
   };
   return handleQuestTurnInBase(player, deps);
 }
@@ -1132,17 +1132,12 @@ function wireInteractions() {
     if (now - lastTime < 500) return true; // Blocked (ignored) but return true to say "handled/cancel"
     lastInteractTime.set(player.name, now);
 
-    // Save Board Location and Trigger Atmosphere
+    // Save Board Location
     if (!world.getDynamicProperty("superquester:board_location") || player.isSneaking) {
       world.setDynamicProperty("superquester:board_location", JSON.stringify(block.location));
     }
 
-    // Trigger the "Pitch Black" effect (Defer to next tick to avoid Restricted Execution error)
-    system.run(() => {
-      try {
-        AtmosphereManager.trigger(player);
-      } catch (e) { console.warn("Atmos error: " + e); }
-    });
+    // Open quest board (Defer to next tick to avoid Restricted Execution error)
     system.run(() => showQuestBoard(player, tab, true)); // true = standalone
     return true;
   };
@@ -1520,7 +1515,7 @@ function wireInteractions() {
       if (ev.message === "!encounter cleanup") {
         ev.cancel = true;
         system.run(() => {
-          const count = cleanupOrphanedMobs();
+          const count = cleanupOrphanedMobs(ensureQuestData);
           ev.sender.sendMessage(`§aCleaned up ${count} orphaned mobs`);
         });
       }
@@ -1547,7 +1542,7 @@ function handleWorldInitialize() {
   initializeStreakTracking();
 
   // Phase 3: Start encounter proximity monitoring
-  startProximityMonitoring();
+  startProximityMonitoring(ensureQuestData);
 
   // Initialize encounter mob protection (fire damage blocked for tagged mobs)
   initializeEncounterMobProtection();
@@ -1555,7 +1550,7 @@ function handleWorldInitialize() {
   // Phase 5: Clean up orphaned encounter mobs from crashes
   // IMPORTANT: Delay cleanup to give players time to join first
   system.runTimeout(() => {
-    cleanupOrphanedMobs();
+    cleanupOrphanedMobs(ensureQuestData);
   }, 100); // 5 second delay (100 ticks)
 }
 
@@ -1777,6 +1772,11 @@ function bootstrap() {
 
       const quest = data.active;
       let changed = false;
+
+      // Skip HUD updates for encounter quests - EncounterProximity handles those
+      if (quest.isEncounter) {
+        continue;
+      }
 
       // 1. Gather Logic (Active only)
       if (quest.type === "gather" && quest.targetItemIds) {

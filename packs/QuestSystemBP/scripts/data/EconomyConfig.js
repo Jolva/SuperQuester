@@ -36,25 +36,25 @@ export const BASE_REWARDS = {
  */
 export const RARITY_CONFIG = {
     common: {
-        weight: 70,
+        weight: 40,
         color: "§f",           // White
         label: "Common",
         labelFormatted: "§fCommon"
     },
     rare: {
-        weight: 22,
+        weight: 30,
         color: "§9",           // Blue
         label: "Rare",
         labelFormatted: "§9Rare"
     },
     legendary: {
-        weight: 7,
+        weight: 25,
         color: "§6",           // Gold
         label: "Legendary",
         labelFormatted: "§6Legendary"
     },
     mythic: {
-        weight: 1,
+        weight: 5,
         color: "§d",           // Light Purple
         label: "Mythic",
         labelFormatted: "§d§lMythic"  // Bold for extra emphasis
