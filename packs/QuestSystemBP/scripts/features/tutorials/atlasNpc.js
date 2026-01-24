@@ -22,12 +22,11 @@ import { ActionFormData } from "@minecraft/server-ui";
  * @param {import("@minecraft/server").Player} player
  * @param {Object} deps - Dependencies object containing:
  *   - TEXTURES: Icon texture paths
- *   - BOARD_TABS: Quest board tab constants
  *   - showQuestBoard: Function to open quest board
  * @param {Function} showTutorialPageCallback - Callback to show tutorial page
  */
 export function showQuestMasterDialog(player, deps, showTutorialPageCallback) {
-  const { TEXTURES, BOARD_TABS, showQuestBoard } = deps;
+  const { TEXTURES, showQuestBoard } = deps;
 
   const form = new ActionFormData()
     .title("§5§lAtlas")
@@ -60,7 +59,7 @@ export function showQuestMasterDialog(player, deps, showTutorialPageCallback) {
         break;
       case 4:
         // Open the actual quest board
-        showQuestBoard(player, BOARD_TABS.AVAILABLE, true);
+        showQuestBoard(player, "available", true);
         break;
     }
   });

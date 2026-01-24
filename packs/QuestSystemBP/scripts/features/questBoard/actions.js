@@ -9,8 +9,6 @@
  * - Navigation between tabs and detail screens
  */
 
-import { world } from "@minecraft/server";
-
 // =============================================================================
 // MAIN UI ACTION HANDLER
 // =============================================================================
@@ -22,7 +20,6 @@ import { world } from "@minecraft/server";
  * @param {import("@minecraft/server").Player} player
  * @param {Object} action - Action object from button click
  * @param {Object} deps - Dependencies object containing:
- *   - BOARD_TABS: Tab constants
  *   - getQuestColors: Function
  *   - handleRefresh: Function
  *   - handleQuestAccept: Function
@@ -33,20 +30,20 @@ import { world } from "@minecraft/server";
  * @returns {Promise<void>}
  */
 export async function handleUiAction(player, action, deps, showQuestBoard, showQuestDetails, showManageQuest) {
-  const { BOARD_TABS, getQuestColors, handleRefresh, handleQuestAccept, handleQuestTurnIn } = deps;
+  const { getQuestColors, handleRefresh, handleQuestAccept, handleQuestTurnIn } = deps;
 
   if (action.type === "close") return;
 
   const isStandalone = action.fromStandalone ?? false;
 
-  if (action.type === "nav") {
-    await showQuestBoard(player, action.tab, isStandalone, false);
+  if (action.type === "refresh") {
+    handleRefresh(player);
+    await showQuestBoard(player, "available", isStandalone, false);
     return;
   }
 
-  if (action.type === "refresh") {
-    const success = handleRefresh(player);
-    await showQuestBoard(player, BOARD_TABS.AVAILABLE, isStandalone, false);
+  if (action.type === "refresh_leaderboard") {
+    await showQuestBoard(player, "leaderboard", isStandalone, false);
     return;
   }
 

@@ -94,7 +94,6 @@ import { COSTS, STREAK_CONFIG } from "./data/EconomyConfig.js";
 
 // === PHASE 1: DATA TABLE IMPORTS ===
 import { TEXTURES, CATEGORY_TEXTURES } from "./data/textures.js";
-import { BOARD_TABS } from "./data/boardTabs.js";
 import { tutorials } from "./data/tutorials.js";
 
 // === PHASE 2: EVENT SYSTEM IMPORTS ===
@@ -109,14 +108,13 @@ import {
 } from "./features/leaderboard/leaderboardService.js";
 
 // Quest Board UI and routing
-import { BLOCK_TAB_MAP, setPlayerTab, getPlayerTab } from "./features/questBoard/routing.js";
+import { BLOCK_MENU_MAP } from "./features/questBoard/routing.js";
 import {
   showQuestBoard as showQuestBoardUI,
   showAvailableTab,
   showActiveTab,
   showQuestDetails,
-  showManageQuest,
-  addTabButtons
+  showManageQuest
 } from "./features/questBoard/ui.js";
 import { handleUiAction as handleUiActionBase } from "./features/questBoard/actions.js";
 
@@ -278,7 +276,7 @@ const CAT_VARIANTS = [
  *  Config
  *  ----------------------------- */
 
-// NOTE: TEXTURES, CATEGORY_TEXTURES, BOARD_TABS, and tutorials
+// NOTE: TEXTURES, CATEGORY_TEXTURES, and tutorials
 // have been moved to /data/ modules and imported at the top of this file.
 
 // const MAX_ACTIVE_QUESTS = 2; // REMOVED
@@ -334,12 +332,6 @@ const CATEGORY_TEXTURES = {
   farming: TEXTURES.CATEGORY_FARMING,
 };
 
-const BOARD_TABS = {
-  AVAILABLE: "available",
-  ACTIVE: "active",
-  LEADERBOARD: "leaderboard",
-};
-
 /**
  * Get icon for a quest based on rarity and category
  * @param {Object} quest - Quest object with category and rarity fields
@@ -366,8 +358,6 @@ const LEADERBOARD_ENTRY_LIMIT = 10;
 // =============================================================================
 // These Maps track per-player runtime state. They are NOT persisted across
 // server restarts — use PersistenceManager for permanent data!
-
-// NOTE: playerTabState moved to features/questBoard/routing.js (Phase 3B)
 
 /** 
  * Tracks which player last hit each entity (for kill quest attribution).
@@ -758,15 +748,12 @@ function handleQuestAbandon(player) {
  */
 async function showQuestBoard(player, forcedTab = null, isStandalone = false, playOpenSound = true) {
   const deps = {
-    BOARD_TABS,
     TEXTURES,
     TWENTY_FOUR_HOURS_MS,
     ensureQuestData,
     calculateRerollPrice,
     getQuestIcon: getQuestIconWrapper,
     getQuestColors: getQuestColorsWrapper,
-    getPlayerTab,
-    setPlayerTab,
     showLeaderboardTab,
     getLeaderboardEntries,
     handleQuestAbandon
@@ -780,7 +767,6 @@ async function showQuestBoard(player, forcedTab = null, isStandalone = false, pl
  */
 async function handleUiAction(player, action) {
   const deps = {
-    BOARD_TABS,
     getQuestColors: getQuestColorsWrapper,
     handleRefresh,
     handleQuestAccept,
@@ -1087,7 +1073,6 @@ function handleQuestTurnIn(player) {
 function showQuestMasterDialog(player) {
   const deps = {
     TEXTURES,
-    BOARD_TABS,
     showQuestBoard
   };
   return showQuestMasterDialogBase(player, deps, showTutorialPage);
@@ -1107,7 +1092,7 @@ function showTutorialPage(player, topic) {
  *  Interaction & Wiring
  *  ----------------------------- */
 
-// NOTE: BLOCK_TAB_MAP moved to features/questBoard/routing.js (Phase 3B)
+// NOTE: BLOCK_MENU_MAP moved to features/questBoard/routing.js (Phase 3B)
 
 const lastInteractTime = new Map();
 const builderModePlayers = new Set();
@@ -1123,8 +1108,8 @@ function wireInteractions() {
     if (player.isSneaking) return false;
 
     // Check if it's our block FIRST
-    const tab = BLOCK_TAB_MAP[block.typeId];
-    if (!tab) return false;
+    const menuType = BLOCK_MENU_MAP[block.typeId];
+    if (!menuType) return false;
 
     // Debounce only for our blocks
     const now = Date.now();
@@ -1138,7 +1123,7 @@ function wireInteractions() {
     }
 
     // Open quest board (Defer to next tick to avoid Restricted Execution error)
-    system.run(() => showQuestBoard(player, tab, true)); // true = standalone
+    system.run(() => showQuestBoard(player, menuType, true)); // true = standalone
     return true;
   };
 

@@ -3,8 +3,7 @@
  * Quest Board UI rendering system.
  * 
  * Handles:
- * - Tab UI rendering (Available, Active, Quest Details)
- * - Tab button helper (addTabButtons)
+ * - Menu UI rendering (Available, Active, Quest Details)
  * - Main Quest Board entry point (showQuestBoard)
  * - Quest management UI (Abandon confirmation)
  */
@@ -13,42 +12,7 @@ import { system } from "@minecraft/server";
 import { ActionFormData } from "@minecraft/server-ui";
 
 // =============================================================================
-// TAB BUTTON CONFIGURATION
-// =============================================================================
-
-/**
- * Tab configuration for Quest Board navigation.
- * @param {Object} BOARD_TABS - Tab constants (must be passed in)
- * @returns {Array} Array of tab configs
- */
-function getTabsConfig(BOARD_TABS) {
-  return [
-    { id: BOARD_TABS.AVAILABLE, label: "Available" },
-    { id: BOARD_TABS.ACTIVE, label: "Active" },
-    { id: BOARD_TABS.LEADERBOARD, label: "Leaderboard" },
-  ];
-}
-
-/**
- * Adds tab navigation buttons to a form.
- * @param {ActionFormData} form - The form to add buttons to
- * @param {string} currentTab - The currently active tab ID
- * @param {Array} actionsList - Actions array to populate
- * @param {Object} BOARD_TABS - Tab constants (must be passed in)
- */
-export function addTabButtons(form, currentTab, actionsList, BOARD_TABS) {
-  const TABS_CONFIG = getTabsConfig(BOARD_TABS);
-  for (const tab of TABS_CONFIG) {
-    const isCurrent = tab.id === currentTab;
-    const label = isCurrent ? `§l${tab.label}§r` : `${tab.label}`;
-
-    form.button(label, tab.icon);
-    actionsList.push({ type: "nav", tab: tab.id });
-  }
-}
-
-// =============================================================================
-// TAB UI RENDERERS
+// MENU UI RENDERERS
 // =============================================================================
 
 /**
@@ -57,7 +21,6 @@ export function addTabButtons(form, currentTab, actionsList, BOARD_TABS) {
  * @param {Array} actions - Actions array for button mapping
  * @param {boolean} isStandalone - Whether shown standalone or as part of quest board
  * @param {Object} deps - Dependencies object containing:
- *   - BOARD_TABS: Tab constants
  *   - TEXTURES: Texture paths
  *   - TWENTY_FOUR_HOURS_MS: Time constant
  *   - ensureQuestData: Function
@@ -67,7 +30,7 @@ export function addTabButtons(form, currentTab, actionsList, BOARD_TABS) {
  * @returns {ActionFormData} The form to display
  */
 export async function showAvailableTab(player, actions, isStandalone, deps) {
-  const { BOARD_TABS, TEXTURES, TWENTY_FOUR_HOURS_MS, ensureQuestData, calculateRerollPrice, getQuestIcon, getQuestColors } = deps;
+  const { TEXTURES, TWENTY_FOUR_HOURS_MS, ensureQuestData, calculateRerollPrice, getQuestIcon, getQuestColors } = deps;
   const data = ensureQuestData(player);
 
   // Count non-null quests
@@ -103,12 +66,7 @@ export async function showAvailableTab(player, actions, isStandalone, deps) {
     .title(title)
     .body(body);
 
-  // 1. Tabs
-  if (!isStandalone) {
-    addTabButtons(form, BOARD_TABS.AVAILABLE, actions, BOARD_TABS);
-  }
-
-  // 2. Quest buttons (mythic/legendary/rare show rarity badge, common shows category icon)
+  // 1. Quest buttons (mythic/legendary/rare show rarity badge, common shows category icon)
   data.available.forEach((quest, index) => {
     if (quest) {
       const showRarityBadge = quest.rarity === "mythic" || quest.rarity === "legendary" || quest.rarity === "rare";
@@ -119,12 +77,12 @@ export async function showAvailableTab(player, actions, isStandalone, deps) {
     }
   });
 
-  // 3. Refresh button — swaps between refresh arrows (free) and SP coin (paid)
+  // 2. Refresh button — swaps between refresh arrows (free) and SP coin (paid)
   const refreshIcon = data.freeRerollAvailable ? TEXTURES.REFRESH : TEXTURES.SP_COIN;
   form.button(refreshLabel, refreshIcon);
   actions.push({ type: "refresh", fromStandalone: isStandalone });
 
-  // 4. Close option (always good UX)
+  // 3. Close option (always good UX)
   form.button("Close");
   actions.push({ type: "close" });
 
@@ -137,7 +95,6 @@ export async function showAvailableTab(player, actions, isStandalone, deps) {
  * @param {Array} actions - Actions array for button mapping
  * @param {boolean} isStandalone - Whether shown standalone or as part of quest board
  * @param {Object} deps - Dependencies object containing:
- *   - BOARD_TABS: Tab constants
  *   - TEXTURES: Texture paths
  *   - ensureQuestData: Function
  *   - getQuestIcon: Function
@@ -145,7 +102,7 @@ export async function showAvailableTab(player, actions, isStandalone, deps) {
  * @returns {ActionFormData} The form to display
  */
 export async function showActiveTab(player, actions, isStandalone, deps) {
-  const { BOARD_TABS, TEXTURES, ensureQuestData, getQuestIcon, getQuestColors } = deps;
+  const { TEXTURES, ensureQuestData, getQuestIcon, getQuestColors } = deps;
   const data = ensureQuestData(player);
 
   const header = isStandalone ? "" : "§2§l[ ACTIVE ]§r\n\n";
@@ -159,12 +116,7 @@ export async function showActiveTab(player, actions, isStandalone, deps) {
     .title(title)
     .body(body);
 
-  // 1. Tabs
-  if (!isStandalone) {
-    addTabButtons(form, BOARD_TABS.ACTIVE, actions, BOARD_TABS);
-  }
-
-  // 2. Content
+  // 1. Content
   if (data.active) {
     const quest = data.active;
     const icon = getQuestIcon(quest);
@@ -199,7 +151,6 @@ export async function showActiveTab(player, actions, isStandalone, deps) {
  * @param {number} questIndex - Index of quest in available array
  * @param {boolean} isStandalone - Whether shown standalone
  * @param {Object} deps - Dependencies object containing:
- *   - BOARD_TABS: Tab constants
  *   - ensureQuestData: Function
  *   - getQuestColors: Function
  * @param {Function} showQuestBoard - Reference to showQuestBoard for navigation
@@ -207,7 +158,7 @@ export async function showActiveTab(player, actions, isStandalone, deps) {
  * @returns {Promise<void>}
  */
 export async function showQuestDetails(player, questIndex, isStandalone, deps, showQuestBoard, handleUiAction) {
-  const { BOARD_TABS, ensureQuestData, getQuestColors } = deps;
+  const { ensureQuestData, getQuestColors } = deps;
   const data = ensureQuestData(player);
   const def = data.available[questIndex];
   if (!def) return;
@@ -259,7 +210,7 @@ export async function showQuestDetails(player, questIndex, isStandalone, deps, s
   const res = await form.show(player);
 
   if (res.canceled) {
-    await showQuestBoard(player, BOARD_TABS.AVAILABLE, isStandalone, false);
+    await showQuestBoard(player, "available", isStandalone, false);
     return;
   }
 
@@ -270,7 +221,7 @@ export async function showQuestDetails(player, questIndex, isStandalone, deps, s
   }
 
   // Decline (selection === 1)
-  await showQuestBoard(player, BOARD_TABS.AVAILABLE, isStandalone, false);
+  await showQuestBoard(player, "available", isStandalone, false);
 }
 
 /**
@@ -278,7 +229,6 @@ export async function showQuestDetails(player, questIndex, isStandalone, deps, s
  * @param {import("@minecraft/server").Player} player
  * @param {boolean} isStandalone - Whether shown standalone
  * @param {Object} deps - Dependencies object containing:
- *   - BOARD_TABS: Tab constants
  *   - ensureQuestData: Function
  *   - getQuestColors: Function
  *   - handleQuestAbandon: Function
@@ -286,10 +236,10 @@ export async function showQuestDetails(player, questIndex, isStandalone, deps, s
  * @returns {Promise<void>}
  */
 export async function showManageQuest(player, isStandalone, deps, showQuestBoard) {
-  const { BOARD_TABS, ensureQuestData, getQuestColors, handleQuestAbandon } = deps;
+  const { ensureQuestData, getQuestColors, handleQuestAbandon } = deps;
   const data = ensureQuestData(player);
   if (!data.active) {
-    await showQuestBoard(player, BOARD_TABS.ACTIVE, isStandalone, false);
+    await showQuestBoard(player, "active", isStandalone, false);
     return;
   }
 
@@ -306,7 +256,7 @@ export async function showManageQuest(player, isStandalone, deps, showQuestBoard
 
   if (res.canceled || res.selection === 1) {
     // "No, Keep" or canceled
-    await showQuestBoard(player, BOARD_TABS.ACTIVE, isStandalone, false);
+    await showQuestBoard(player, "active", isStandalone, false);
     return;
   }
 
@@ -317,7 +267,7 @@ export async function showManageQuest(player, isStandalone, deps, showQuestBoard
       const c = getQuestColors(removed.rarity);
       player.sendMessage(`§eAbandoned: ${c.chat}${removed.title}§r`);
     }
-    await showQuestBoard(player, BOARD_TABS.ACTIVE, isStandalone, false);
+    await showQuestBoard(player, "active", isStandalone, false);
   }
 }
 
@@ -326,40 +276,33 @@ export async function showManageQuest(player, isStandalone, deps, showQuestBoard
 // =============================================================================
 
 /**
- * Main Quest Board display function. Routes to appropriate tab and handles initial sounds.
+ * Main Quest Board display function. Routes to appropriate menu and handles initial sounds.
  * @param {import("@minecraft/server").Player} player
- * @param {string|null} forcedTab - Force a specific tab (or null for player's last tab)
+ * @param {string|null} forcedMenu - Force a specific menu (or null for default)
  * @param {boolean} isStandalone - Whether this is standalone or full board navigation
  * @param {boolean} playOpenSound - Whether to play the tab open sound
  * @param {Object} deps - Dependencies object containing all required functions and constants
  * @param {Function} handleUiAction - Reference to handleUiAction for button actions
  * @returns {Promise<void>}
  */
-export async function showQuestBoard(player, forcedTab, isStandalone, playOpenSound, deps, handleUiAction) {
+export async function showQuestBoard(player, forcedMenu, isStandalone, playOpenSound, deps, handleUiAction) {
   const {
-    BOARD_TABS,
     ensureQuestData,
-    getPlayerTab,
-    setPlayerTab,
     showLeaderboardTab,
     getLeaderboardEntries
   } = deps;
 
-  // ensureQuestData handles expiry now, called inside tab functions too, but calling here helps consistency
+  // ensureQuestData handles expiry now, called inside menu functions too, but calling here helps consistency
   const data = ensureQuestData(player);
-
-  const tab = forcedTab || getPlayerTab(player, BOARD_TABS, ensureQuestData);
-  if (!isStandalone) {
-    setPlayerTab(player, tab); // Ensure state is synced only if navigating
-  }
+  const menu = forcedMenu || (data.active ? "active" : "available");
 
   // Play menu open sounds based on which tab is opening (initial open only)
   if (playOpenSound) {
-    if (tab === BOARD_TABS.AVAILABLE) {
+    if (menu === "available") {
       player.playSound("ui.available_open", { volume: 0.8, pitch: 1.0 });
-    } else if (tab === BOARD_TABS.ACTIVE) {
+    } else if (menu === "active") {
       player.playSound("ui.active_open", { volume: 0.8, pitch: 1.0 });
-    } else if (tab === BOARD_TABS.LEADERBOARD) {
+    } else if (menu === "leaderboard") {
       player.playSound("ui.legends_open", { volume: 0.8, pitch: 1.0 });
 
       // Check if this player is ranked #1 on the leaderboard
@@ -389,15 +332,15 @@ export async function showQuestBoard(player, forcedTab, isStandalone, playOpenSo
   let form;
   const actions = []; // List of actions corresponding to buttons by index
 
-  switch (tab) {
-    case BOARD_TABS.AVAILABLE:
+  switch (menu) {
+    case "available":
       form = await showAvailableTab(player, actions, isStandalone, deps);
       break;
-    case BOARD_TABS.ACTIVE:
+    case "active":
       form = await showActiveTab(player, actions, isStandalone, deps);
       break;
-    case BOARD_TABS.LEADERBOARD:
-      form = await showLeaderboardTab(player, actions, isStandalone, BOARD_TABS, addTabButtons);
+    case "leaderboard":
+      form = await showLeaderboardTab(player, actions, isStandalone);
       break;
     default:
       form = await showAvailableTab(player, actions, isStandalone, deps);

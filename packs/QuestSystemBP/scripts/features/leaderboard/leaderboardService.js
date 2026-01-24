@@ -179,11 +179,9 @@ export function getLeaderboardEntries(player) {
  * @param {import("@minecraft/server").Player} player - Current player
  * @param {Array} actions - Actions array for button mapping
  * @param {boolean} isStandalone - Whether shown standalone or as part of quest board
- * @param {Object} BOARD_TABS - Tab constants (imported from caller)
- * @param {Function} addTabButtons - Tab button renderer (imported from caller)
  * @returns {ActionFormData} The form to display
  */
-export async function showLeaderboardTab(player, actions, isStandalone, BOARD_TABS, addTabButtons) {
+export async function showLeaderboardTab(player, actions, isStandalone) {
   const { entries, currentPlayer, missingObjective } = getLeaderboardEntries(player);
 
   const header = isStandalone ? "" : "§2§l[ LEADERBOARD ]§r\n\n";
@@ -210,16 +208,11 @@ export async function showLeaderboardTab(player, actions, isStandalone, BOARD_TA
     .title(title)
     .body(bodyText);
 
-  // 1. Tabs (if not standalone)
-  if (!isStandalone && addTabButtons && BOARD_TABS) {
-    addTabButtons(form, BOARD_TABS.LEADERBOARD, actions);
-  }
-
-  // 2. Refresh button
+  // 1. Refresh button
   form.button("Refresh");
-  actions.push({ type: "nav", tab: BOARD_TABS.LEADERBOARD, fromStandalone: isStandalone });
+  actions.push({ type: "refresh_leaderboard", fromStandalone: isStandalone });
 
-  // 3. Close button
+  // 2. Close button
   form.button("Close");
   actions.push({ type: "close" });
 
