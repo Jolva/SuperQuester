@@ -39,5 +39,25 @@
   "quest:leader_bot": {
     "textures": "quest_board_texture",
     "sound": "wood"
+  },
+  "spss:green": {
+    "textures": "spss_texture",
+    "sound": "wood"
+  },
+  "spss:top_left": {
+    "textures": "spss_texture",
+    "sound": "wood"
+  },
+  "spss:top_right": {
+    "textures": "spss_texture",
+    "sound": "wood"
+  },
+  "spss:bottom_left": {
+    "textures": "spss_texture",
+    "sound": "wood"
+  },
+  "spss:bottom_right": {
+    "textures": "spss_texture",
+    "sound": "wood"
   }
 }

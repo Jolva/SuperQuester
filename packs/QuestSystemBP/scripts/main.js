@@ -127,8 +127,7 @@ import {
   calculateRerollPrice as calculateRerollPriceBase,
   handleRefresh as handleRefreshBase,
   handleQuestAccept as handleQuestAcceptBase,
-  handleQuestAbandon as handleQuestAbandonBase,
-  handleQuestTurnIn as handleQuestTurnInBase
+  handleQuestAbandon as handleQuestAbandonBase
 } from "./features/quests/questLifecycle.js";
 
 // HUD system
@@ -142,7 +141,7 @@ import {
 } from "./features/tutorials/atlasNpc.js";
 
 // Ambient systems
-import { initializeTownMusicLoop } from "./features/ambient/music.js";
+import { initializeTownMusicLoop, initializeSPSSMusicLoop } from "./features/ambient/music.js";
 import { initializeDogBarkingLoop, initializeCatSquadLoop } from "./features/ambient/atmosphericSounds.js";
 import { registerChatCommands } from "./features/debug/chatCommands.js";
 
@@ -207,6 +206,21 @@ const TOWN_RADIUS = 20;
 const TOWN_MUSIC_SOUND_ID = "questboard.music.town";
 const TRACK_DURATION_TICKS = 880; // ~44 seconds (slight overlap for seamless loop)
 const MUSIC_CHECK_INTERVAL = 10;  // Check every 0.5 seconds
+
+// --- SPSS Music Zone (Super Points Super Store) ---
+const SPSS_MUSIC_SOUND_ID = "spss.music.store";
+const SPSS_TRACK_DURATION_TICKS = 880; // ~44 seconds (adjust based on your track length)
+const SPSS_MUSIC_CHECK_INTERVAL = 10;  // Check every 0.5 seconds
+// SPSS Zone Boundaries - CUSTOMIZE THESE COORDINATES!
+// Define the rectangular area of your SPSS store
+const SPSS_ZONE_BOUNDS = {
+  minX: 91,   // Replace with your store's minimum X coordinate
+  maxX: 102,   // Replace with your store's maximum X coordinate
+  minY: 77,   // Replace with your store's minimum Y coordinate (floor level)
+  maxY: 85,   // Replace with your store's maximum Y coordinate (ceiling level)
+  minZ: -294, // Replace with your store's minimum Z coordinate
+  maxZ: -287  // Replace with your store's maximum Z coordinate
+};
 
 // --- Dog Barking Zone (comedic escalation near quest board) ---
 const DOG_SOUNDS = ["atmosphere.dogs_01", "atmosphere.dogs_02", "atmosphere.dogs_03"];
@@ -382,6 +396,10 @@ const lastHitPlayerByEntityId = new Map();
 // Tracks per-player music state: { inZone: boolean, nextReplayTick: number }
 const playerMusicState = new Map();
 
+// === SPSS MUSIC ZONE STATE ===
+// Tracks per-player SPSS music state: { inZone: boolean, nextReplayTick: number }
+const playerSPSSMusicState = new Map();
+
 // === DOG BARKING ZONE STATE ===
 // Tracks per-player dog barking state: { inZone: boolean, nextBarkTick: number }
 const playerDogBarkState = new Map();
@@ -456,6 +474,10 @@ function modifySP(player, delta, options = {}) {
 
   // Update scoreboard
   objective.setScore(player, newBalance);
+
+  // Ensure player is registered in leaderboard name registry
+  // This is critical for script events that modify SP directly
+  registerPlayerName(player);
 
   // Update backup in dynamic properties using cache
   const data = ensureQuestData(player);
@@ -782,7 +804,6 @@ async function handleUiAction(player, action) {
     getQuestColors: getQuestColorsWrapper,
     handleRefresh,
     handleQuestAccept,
-    handleQuestTurnIn,
     ensureQuestData,
     handleQuestAbandon
   };
@@ -861,21 +882,175 @@ function updateQuestHud(player, questState) {
   return updateQuestHudBase(player, questState);
 }
 
-// NOTE: markQuestComplete helper is less useful now as logic is split, but let's keep it for event handlers
+/**
+ * Handles instant quest completion with immediate rewards.
+ * This replaces the old turn-in system - rewards are now given immediately when quest objectives are completed.
+ * @param {Player} player - The player who completed the quest
+ * @param {Object} questState - The quest that was completed
+ */
 function markQuestComplete(player, questState) {
-  // Just playing sound/particle, turn-in logic does the real completion
-  // But wait, for Kill/Mine we need to know they are "Ready to Turn In".
-  // In new system: "Complete" means "Ready to Turn In" (status check in UI).
-  // But we don't have a status field on the object in DB anymore (it's flattened).
-  // So "Complete" is derived from progress >= goal.
+  const data = ensureQuestData(player);
+  if (!data.active || data.active.id !== questState.id) {
+    console.warn(`[markQuestComplete] Quest mismatch or no active quest for player ${player.name}`);
+    return;
+  }
 
-  // This function is called when progress hits goal in events.
-  player.onScreenDisplay?.setActionBar?.("§aQuest complete! Return to board.§r");
+  const quest = data.active;
+  
+  // === GATHER QUEST ITEM CONSUMPTION ===
+  // For gather quests, we need to consume the required items from inventory
+  if (quest.type === "gather" && quest.targetItemIds) {
+    const inventory = player.getComponent("inventory")?.container;
+    if (!inventory) {
+      console.warn(`[markQuestComplete] No inventory found for gather quest completion`);
+      return;
+    }
 
-  const colors = getQuestColorsWrapper(questState.rarity);
-  player.sendMessage(`§aQuest Complete: ${colors.chat}${questState.title}§r`);
-  player.playSound("random.levelup");
-  player.dimension.spawnParticle("minecraft:villager_happy", player.location);
+    // Count available items
+    let totalCount = 0;
+    for (let i = 0; i < inventory.size; i++) {
+      const item = inventory.getItem(i);
+      if (item && quest.targetItemIds.includes(item.typeId)) {
+        totalCount += item.amount;
+      }
+    }
+
+    if (totalCount < quest.requiredCount) {
+      // This shouldn't happen if called correctly, but safety check
+      console.warn(`[markQuestComplete] Insufficient items for gather quest: ${totalCount}/${quest.requiredCount}`);
+      return;
+    }
+
+    // Consume the required items
+    let remainingToRemove = quest.requiredCount;
+    for (let i = 0; i < inventory.size; i++) {
+      if (remainingToRemove <= 0) break;
+      const item = inventory.getItem(i);
+      if (item && quest.targetItemIds.includes(item.typeId)) {
+        if (item.amount <= remainingToRemove) {
+          remainingToRemove -= item.amount;
+          inventory.setItem(i, undefined);
+        } else {
+          item.amount -= remainingToRemove;
+          remainingToRemove = 0;
+          inventory.setItem(i, item);
+        }
+      }
+    }
+    
+    // Notify player about item consumption
+    const itemNames = quest.targetItemIds.map(id => id.replace("minecraft:", "").replace(/_/g, " ")).join(", ");
+    player.sendMessage(`§7Consumed: ${quest.requiredCount}x ${itemNames}§r`);
+  }
+
+  // === ENCOUNTER CLEANUP ===
+  // Despawn remaining encounter mobs if this is an encounter quest
+  if (quest.isEncounter && quest.spawnData) {
+    try {
+      const dimension = world.getDimension(quest.spawnData.dimensionId || "overworld");
+      const despawnedCount = despawnEncounterMobs(quest.id, dimension);
+      if (despawnedCount > 0) {
+        console.log(`[markQuestComplete] Despawned ${despawnedCount} remaining mobs for quest ${quest.id}`);
+      }
+    } catch (error) {
+      console.error(`[markQuestComplete] Error despawning encounter mobs: ${error}`);
+    }
+  }
+
+  // === REWARD CALCULATION AND DISTRIBUTION ===
+  const reward = quest.reward;
+  const questBaseSP = reward?.scoreboardIncrement ?? 0;
+  const isFirstOfDay = !hasCompletedQuestToday(player);
+
+  const rewardResult = calculateCompletionReward(
+    questBaseSP,
+    quest.rarity,
+    player,
+    isFirstOfDay
+  );
+
+  // Award SP
+  if (rewardResult.finalAmount > 0) {
+    addSP(player, rewardResult.finalAmount, { skipCelebration: true });
+    
+    // Trigger celebration with small delay to ensure SP display updates first
+    system.runTimeout(() => {
+      celebrateQuestComplete(player, {
+        rarity: quest.rarity,
+        spAmount: rewardResult.finalAmount,
+        isJackpot: rewardResult.isJackpot || false,
+        streakLabel: rewardResult.streakLabel || null
+      });
+    }, 3);
+  }
+
+  // Increment streak
+  incrementStreak(player);
+
+  // Mark daily completion
+  markDailyCompletion(player);
+
+  // Display reward message
+  player.sendMessage(rewardResult.message);
+
+  // Play jackpot sound if triggered
+  if (rewardResult.isJackpot) {
+    player.playSound("random.levelup", { volume: 1.0, pitch: 1.2 });
+  }
+
+  // Award item rewards
+  if (reward && reward.rewardItems) {
+    const inventory = player.getComponent("inventory")?.container;
+    if (inventory) {
+      for (const rItem of reward.rewardItems) {
+        try {
+          const itemStack = new ItemStack(rItem.typeId, rItem.amount);
+          inventory.addItem(itemStack);
+          player.sendMessage(`§aReceived: ${rItem.amount}x ${rItem.typeId.replace("minecraft:", "")}§r`);
+        } catch (e) {
+          // Inventory full — drop at feet
+          player.dimension.spawnItem(new ItemStack(rItem.typeId, rItem.amount), player.location);
+          player.sendMessage(`§eInventory full! Dropped: ${rItem.amount}x ${rItem.typeId.replace("minecraft:", "")}§r`);
+        }
+      }
+    }
+  }
+
+  // Update stats
+  data.lifetimeCompleted += 1;
+
+  // Clear active quest
+  data.active = null;
+  data.progress = 0;
+
+  // === CHECK FOR ALL QUESTS COMPLETE ===
+  const allComplete = data.available.every(slot => slot === null);
+
+  if (allComplete) {
+    // All 3 quests completed! Auto-generate new quests and trigger celebration
+    data.available = QuestGenerator.generateDailyQuests(3);
+    data.lastRefreshTime = Date.now();
+    data.freeRerollAvailable = true;
+    data.paidRerollsThisCycle = 0;
+
+    PersistenceManager.saveQuestData(player, data);
+
+    // Trigger all-quests-complete celebration
+    triggerQuestClearCelebration(player, rewardResult.finalAmount);
+    player.sendMessage("§6§l★ ALL QUESTS COMPLETE! ★§r");
+    player.sendMessage("§eFresh quests have been generated. Check the Quest Board!§r");
+  } else {
+    // Normal completion
+    PersistenceManager.saveQuestData(player, data);
+
+    const colors = getQuestColorsWrapper(quest.rarity);
+    player.sendMessage(`§a✓ Quest Complete: ${colors.chat}${quest.title}§r`);
+    player.playSound("quest.complete_single", { volume: 1.0, pitch: 1.0 });
+    player.dimension.spawnParticle("minecraft:villager_happy", player.location);
+  }
+
+  // Clear HUD
+  player.onScreenDisplay?.setActionBar?.("");
 }
 
 function handleEntityDeath(ev) {
@@ -932,7 +1107,7 @@ function handleEntityDeath(ev) {
           } else {
             // All mobs killed - quest complete!
             questData.active.encounterState = "complete";  // Phase 3: State transition
-            player.sendMessage(`§a${questData.active.encounterName}: §6COMPLETE! §7Return to the board.`);
+            player.sendMessage(`§a${questData.active.encounterName}: §6COMPLETE!`);
             player.playSound("random.levelup");
             markQuestComplete(player, questData.active);
           }
@@ -1050,34 +1225,6 @@ function wireEntityHitTracking() {
     lastHitPlayerByEntityId.set(hitEntity.id, { id: entity.id, time: Date.now() });
   });
 }
-
-/**
- * Handles quest turn-in - wrapper for extracted lifecycle module
- */
-function handleQuestTurnIn(player) {
-  const deps = {
-    ensureQuestData,
-    PersistenceManager,
-    world,
-    despawnEncounterMobs,
-    calculateCompletionReward,
-    hasCompletedQuestToday,
-    addSP,
-    system,
-    celebrateQuestComplete,
-    incrementStreak,
-    markDailyCompletion,
-    ItemStack,
-    QuestGenerator,
-    triggerQuestClearCelebration,
-    getQuestColors: getQuestColorsWrapper
-  };
-  return handleQuestTurnInBase(player, deps);
-}
-
-/** -----------------------------
- *  Atlas NPC (Phase 5 - Wrappers)
- *  ----------------------------- */
 
 /**
  * Shows the Atlas NPC dialog - wrapper
@@ -1565,6 +1712,17 @@ function bootstrap() {
     TOWN_MUSIC_SOUND_ID,
     TRACK_DURATION_TICKS,
     MUSIC_CHECK_INTERVAL
+  });
+
+  // Initialize SPSS music zone
+  initializeSPSSMusicLoop({
+    system,
+    world,
+    playerSPSSMusicState,
+    SPSS_ZONE_BOUNDS,
+    SPSS_MUSIC_SOUND_ID,
+    SPSS_TRACK_DURATION_TICKS: SPSS_TRACK_DURATION_TICKS,
+    SPSS_MUSIC_CHECK_INTERVAL
   });
 
   // Initialize dog barking zone

@@ -274,10 +274,11 @@ export function handleQuestAbandon(player, deps) {
 // =============================================================================
 
 /**
- * Handles quest turn-in validation, reward calculation, and completion.
- * Validates completion requirements, awards rewards, triggers celebrations,
- * and handles full quest clear bonus.
+ * DEPRECATED: Quest turn-in handling - now handled instantly on completion.
+ * This function is kept for reference but should not be called in the new instant reward system.
+ * Rewards are now awarded immediately when quest objectives are completed via markQuestComplete().
  * 
+ * @deprecated Use markQuestComplete() for instant rewards instead
  * @param {import("@minecraft/server").Player} player
  * @param {Object} deps - Massive dependencies object (see function body for full list)
  * @returns {void}

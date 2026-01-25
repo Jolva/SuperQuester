@@ -36,10 +36,21 @@
 
 import { world, system } from "@minecraft/server";
 const WARN_MESSAGE = "§cProtected Hub: No Building Allowed.";
+const WARN_MESSAGE_SPSS = "§cProtected Store: No Building Allowed.";
 const DEFAULT_RADIUS = 20;
 
 // PERMANENT Quest Board Location - This is the fixed center of the safe zone
 const QUEST_BOARD_LOCATION = { x: 72, y: 75, z: -278 };
+
+// SPSS Store Protection Bounds (music zone + 3 blocks buffer)
+const SPSS_PROTECTION_BOUNDS = {
+  minX: 88,   // 91 - 3
+  maxX: 105,  // 102 + 3
+  minY: 74,   // 77 - 3
+  maxY: 88,   // 85 + 3
+  minZ: -297, // -294 - 3
+  maxZ: -284  // -287 + 3
+};
 
 // Dynamic state - can be toggled in-game
 let safeZoneEnabled = true;
@@ -78,6 +89,23 @@ export function isInSafeZone(location) {
   const dz = location.z - center.z;
   // Simple 2D distance check (cylinder protection)
   return (dx * dx + dz * dz) <= (radius * radius);
+}
+
+/**
+ * Checks if a location is within the SPSS store protection zone.
+ * @param {import("@minecraft/server").Vector3} location
+ * @returns {boolean}
+ */
+export function isInSPSSZone(location) {
+  if (!safeZoneEnabled) return false;
+  if (!location) return false;
+
+  const bounds = SPSS_PROTECTION_BOUNDS;
+  return (
+    location.x >= bounds.minX && location.x <= bounds.maxX &&
+    location.y >= bounds.minY && location.y <= bounds.maxY &&
+    location.z >= bounds.minZ && location.z <= bounds.maxZ
+  );
 }
 
 /**
@@ -129,10 +157,16 @@ export function registerSafeZoneEvents() {
     try {
       if (!safeZoneEnabled) return;
       if (canBypass(ev.player)) return;
+      
       if (isInSafeZone(ev.block.location)) {
         ev.cancel = true;
         system.run(() => {
           ev.player.onScreenDisplay?.setActionBar?.(WARN_MESSAGE);
+        });
+      } else if (isInSPSSZone(ev.block.location)) {
+        ev.cancel = true;
+        system.run(() => {
+          ev.player.onScreenDisplay?.setActionBar?.(WARN_MESSAGE_SPSS);
         });
       }
     } catch (e) {
@@ -146,10 +180,16 @@ export function registerSafeZoneEvents() {
       try {
         if (!safeZoneEnabled) return;
         if (canBypass(ev.player)) return;
+        
         if (isInSafeZone(ev.block.location)) {
           ev.cancel = true;
           system.run(() => {
             ev.player.onScreenDisplay?.setActionBar?.(WARN_MESSAGE);
+          });
+        } else if (isInSPSSZone(ev.block.location)) {
+          ev.cancel = true;
+          system.run(() => {
+            ev.player.onScreenDisplay?.setActionBar?.(WARN_MESSAGE_SPSS);
           });
         }
       } catch (e) {
@@ -167,7 +207,7 @@ export function registerSafeZoneEvents() {
       const entity = ev.entity ?? ev.hurtEntity;
       if (!entity || entity.typeId !== "minecraft:player") return;
 
-      if (isInSafeZone(entity.location)) {
+      if (isInSafeZone(entity.location) || isInSPSSZone(entity.location)) {
         const attacker = ev.damageSource.damagingEntity;
         if (attacker && isHostile(attacker.typeId)) {
           ev.cancel = true;
@@ -181,16 +221,16 @@ export function registerSafeZoneEvents() {
     world.beforeEvents.explosion.subscribe((ev) => {
       if (!safeZoneEnabled) return;
 
-      // Check if explosion origin is in safe zone
-      if (ev.source && isInSafeZone(ev.source.location)) {
+      // Check if explosion origin is in safe zone or SPSS zone
+      if (ev.source && (isInSafeZone(ev.source.location) || isInSPSSZone(ev.source.location))) {
         ev.cancel = true;
         return;
       }
 
-      // Filter out blocks that would be destroyed in safe zone
+      // Filter out blocks that would be destroyed in safe zone or SPSS zone
       if (ev.getImpactedBlocks) {
         const blocks = ev.getImpactedBlocks();
-        const safeBlocks = blocks.filter(block => !isInSafeZone(block.location));
+        const safeBlocks = blocks.filter(block => !isInSafeZone(block.location) && !isInSPSSZone(block.location));
         ev.setImpactedBlocks(safeBlocks);
       }
     });
@@ -206,8 +246,8 @@ export function registerSafeZoneEvents() {
     // Allow manual spawning by admins/testing
     if (cause === "SpawnEgg" || cause === "Command" || cause === "Override") return;
 
-    // Only check hostiles in safe zone
-    if (!isHostile(entity.typeId) || !isInSafeZone(entity.location)) return;
+    // Only check hostiles in safe zone or SPSS zone
+    if (!isHostile(entity.typeId) || (!isInSafeZone(entity.location) && !isInSPSSZone(entity.location))) return;
 
     // ENCOUNTER SYSTEM EXCEPTION: Delay check to allow tags to be applied
     // The encounter spawner adds tags immediately after spawn, but this event
@@ -237,7 +277,7 @@ export function registerSafeZoneEvents() {
     if (!safeZoneEnabled) return;
 
     const { entity } = ev;
-    if (entity.typeId === "minecraft:enderman" && isInSafeZone(entity.location)) {
+    if (entity.typeId === "minecraft:enderman" && (isInSafeZone(entity.location) || isInSPSSZone(entity.location))) {
       // Remove enderman's carried block if any or just remove endermen entirely
       try {
         entity.remove();

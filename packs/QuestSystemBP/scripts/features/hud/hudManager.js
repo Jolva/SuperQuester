@@ -52,12 +52,16 @@ export function updateSPDisplay(player, value, options, getSP, SPAnimator) {
  */
 export function sendSPDisplayValue(player, value) {
   try {
-    // Invisible timing: 0 fade in, 1 tick stay, 0 fade out
-    // JSON UI still captures the value even with minimal duration
-    player.runCommandAsync(`titleraw @s times 0 1 0`);
+    // Ultra-invisible timing: No fade, immediate clear
+    // Set timing to 0 fade in, 0 stay, 0 fade out for truly invisible display
+    player.runCommandAsync(`titleraw @s times 0 0 0`);
 
-    // Send title with SP value
+    // Send title with SP value - JSON UI captures this instantly
     player.runCommandAsync(`titleraw @s title {"rawtext":[{"text":"SPVAL:${value}"}]}`);
+
+    // Immediately clear the title to prevent any visual flash
+    // JSON UI will have already captured the value by this point
+    player.runCommandAsync(`titleraw @s title ""`);
 
   } catch (e) {
     console.warn(`[SuperQuester] Failed to update SP display for ${player.name}: ${e}`);

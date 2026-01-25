@@ -77,10 +77,7 @@ export async function handleUiAction(player, action, deps, showQuestBoard, showQ
     return;
   }
 
-  if (action.type === "turnIn") {
-    handleQuestTurnIn(player);
-    return;
-  }
+  // Note: turnIn action removed - rewards are now instant on completion
 
   if (action.type === "manage") {
     // Show management for active quest (Abandon)

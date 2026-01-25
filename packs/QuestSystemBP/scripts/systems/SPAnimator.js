@@ -15,16 +15,16 @@ import { system } from "@minecraft/server";
 const ANIMATION_CONFIG = {
     // Duration scaling based on SP amount
     timing: {
-        minDurationTicks: 6,      // 0.3 seconds minimum
-        maxDurationTicks: 40,     // 2.0 seconds maximum
-        ticksPerHundredSP: 8,     // Base scaling
+        minDurationTicks: 20,     // 1.0 seconds minimum (was 0.3)
+        maxDurationTicks: 100,    // 5.0 seconds maximum (was 2.0)
+        ticksPerHundredSP: 20,    // Base scaling (was 8, now slower)
     },
     
     // Tick count scaling
     ticks: {
-        minTicks: 3,
-        maxTicks: 30,
-        ticksPerTenSP: 1,         // Roughly 1 tick per 10 SP gained
+        minTicks: 5,              // More minimum ticks for smoother animation
+        maxTicks: 50,             // Higher ceiling for large amounts
+        ticksPerTenSP: 1.5,       // More ticks per 10 SP for smoother counting
     },
     
     // Audio settings

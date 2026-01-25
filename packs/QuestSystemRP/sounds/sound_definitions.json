@@ -182,6 +182,16 @@
         }
       ]
     },
+    "spss.music.store": {
+      "category": "music",
+      "sounds": [
+        {
+          "name": "sounds/music/town/spss_track_1",
+          "volume": 0.65,
+          "load_on_low_memory": true
+        }
+      ]
+    },
     "atmosphere.dogs_01": {
       "category": "ambient",
       "sounds": [

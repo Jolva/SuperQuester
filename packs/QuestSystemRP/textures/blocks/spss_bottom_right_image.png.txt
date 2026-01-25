@@ -1,0 +1,2 @@
+This is a placeholder file for spss_bottom_right_image.png
+You should replace this with a 16x16 image for the bottom-right corner of your 2x2 SPSS display.

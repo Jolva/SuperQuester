@@ -122,16 +122,17 @@ export async function showActiveTab(player, actions, isStandalone, deps) {
     const icon = getQuestIcon(quest);
     const colors = getQuestColors(quest.rarity);
 
-    // Check completion
+    // Check completion - since rewards are now instant, completed quests will be cleared
+    // So we should never see a completed quest here, but handle gracefully
     const isComplete = (quest.type === "gather")
-      ? true // Gather quests validate on turn-in
+      ? data.progress >= quest.requiredCount // Updated logic for gather quests
       : data.progress >= quest.requiredCount;
 
-    // For mining/kill, we use data.progress. Gather is checked on turn-in.
-
     if (isComplete) {
-      form.button(`§aTurn In: ${quest.title}§r`, TEXTURES.COMPLETE);
-      actions.push({ type: "turnIn", fromStandalone: isStandalone });
+      // Quest is complete but somehow still active - this shouldn't happen with instant rewards
+      // Show as completed and allow management
+      form.button(`§a✓ Completed: ${quest.title}§r`, TEXTURES.COMPLETE);
+      actions.push({ type: "manage", fromStandalone: isStandalone });
 
       form.button("§cManage / Abandon§r", "textures/quest_ui/button_abandon");
       actions.push({ type: "manage", fromStandalone: isStandalone });
