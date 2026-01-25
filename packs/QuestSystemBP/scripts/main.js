@@ -163,6 +163,7 @@ import {
   spawnEncounterMobs,
   despawnEncounterMobs,
   respawnRemainingMobs,
+  respawnMissingMobs,
   isEncounterMob,
   getQuestIdFromMob,
   countRemainingMobs,
@@ -236,6 +237,10 @@ const DOG_MAX_RADIUS = 20; // Full safe zone coverage!
 const CAT_CHECK_INTERVAL = 20; // Check every 20 ticks (1 second)
 const CAT_MAX_RADIUS = 20; // Full safe zone coverage!
 const CAT_SPAWN_RADIUS = 1.5; // How far from player to spawn cats
+
+// === ENCOUNTER PERSISTENCE MONITOR ===
+const ENCOUNTER_PERSISTENCE_CHECK_INTERVAL = 200; // 10 seconds
+const ENCOUNTER_PERSISTENCE_MAX_DISTANCE = 96; // Only respawn when player is near the spawn area
 
 // Distance tiers: [maxDistance, numberOfCats]
 // Expanded to cover full 20-block safe zone!
@@ -1206,6 +1211,53 @@ function handleWorldInitialize() {
   system.runTimeout(() => {
     cleanupOrphanedMobs(ensureQuestData);
   }, 100); // 5 second delay (100 ticks)
+
+  // Encounter persistence monitor (respawn missing mobs mid-mission)
+  startEncounterPersistenceMonitor();
+}
+
+/**
+ * Periodically ensure encounter mobs persist near the player
+ * If mobs despawn naturally or due to chunk issues, respawn missing count
+ */
+function startEncounterPersistenceMonitor() {
+  system.runInterval(() => {
+    for (const player of world.getPlayers()) {
+      const data = ensureQuestData(player);
+      const quest = data?.active;
+
+      if (!quest?.isEncounter) continue;
+      if (quest.encounterState !== "spawned") continue;
+      if (!quest.spawnData?.location) continue;
+
+      const progress = data.progress || 0;
+      const remainingExpected = quest.totalMobCount - progress;
+      if (remainingExpected <= 0) continue;
+
+      const dimensionId = quest.spawnData.dimensionId || player.dimension.id || "overworld";
+      if (player.dimension.id !== dimensionId) continue;
+
+      const distanceToSpawn = calculateDistance(player.location, quest.spawnData.location);
+      if (distanceToSpawn > ENCOUNTER_PERSISTENCE_MAX_DISTANCE) continue;
+
+      const dimension = player.dimension;
+      const alive = countRemainingMobs(quest.id, dimension);
+
+      if (alive < remainingExpected) {
+        const missing = remainingExpected - alive;
+        const respawnedIds = respawnMissingMobs(quest, missing, dimension);
+
+        if (respawnedIds.length > 0) {
+          quest.spawnData.spawnedEntityIds = [
+            ...(quest.spawnData.spawnedEntityIds || []),
+            ...respawnedIds
+          ];
+          PersistenceManager.saveQuestData(player, data);
+          console.log(`[EncounterPersistence] Respawned ${respawnedIds.length}/${missing} missing mobs for quest ${quest.id}`);
+        }
+      }
+    }
+  }, ENCOUNTER_PERSISTENCE_CHECK_INTERVAL);
 }
 
 /**
@@ -1305,7 +1357,7 @@ function handlePlayerLeave(ev) {
   const playerId = ev.playerId;
   playerMusicState.delete(playerId);
   playerDogBarkState.delete(playerId);
-  playerQuestDataCache.delete(playerId);
+  const cachedQuestData = playerQuestDataCache.get(playerId);
 
   // Clean up SP count-up animations
   const players = world.getAllPlayers();
@@ -1327,29 +1379,28 @@ function handlePlayerLeave(ev) {
 
   // Encounter cleanup on logout
   try {
-    const dimensions = ["overworld", "nether", "the_end"];
-    let totalDespawned = 0;
+    const quest = cachedQuestData?.active;
+    if (quest?.isEncounter && quest.encounterState === "spawned" && quest.spawnData) {
+      const dimensionId = quest.spawnData.dimensionId || "overworld";
+      const dimension = world.getDimension(dimensionId);
+      const despawnedCount = despawnEncounterMobs(quest.id, dimension);
 
-    for (const dimId of dimensions) {
-      try {
-        const dimension = world.getDimension(dimId);
-        const entities = dimension.getEntities({ tags: ["sq_encounter_mob"] });
+      quest.spawnData.spawnedEntityIds = [];
 
-        for (const entity of entities) {
-          try {
-            entity.remove();
-            totalDespawned++;
-          } catch (e) { /* Entity may be invalid */ }
-        }
-      } catch (e) { /* Dimension access may fail */ }
-    }
+      const leavingPlayer = world.getAllPlayers().find(p => p.id === playerId);
+      if (leavingPlayer) {
+        PersistenceManager.saveQuestData(leavingPlayer, cachedQuestData);
+      }
 
-    if (totalDespawned > 0) {
-      console.log(`[main] Player ${playerId} logged out - despawned ${totalDespawned} encounter mobs`);
+      if (despawnedCount > 0) {
+        console.log(`[main] Player ${playerId} logged out - despawned ${despawnedCount} mobs for quest ${quest.id}`);
+      }
     }
   } catch (error) {
     console.error(`[main] Error handling encounter cleanup on player leave: ${error}`);
   }
+
+  playerQuestDataCache.delete(playerId);
 }
 
 /**

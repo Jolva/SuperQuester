@@ -449,6 +449,73 @@ export function respawnRemainingMobs(quest, progress, dimension) {
   return spawnedEntityIds;
 }
 
+/**
+ * Respawn a specific number of missing mobs for an encounter
+ * Used by persistence checks to top up missing mobs without resetting progress
+ *
+ * @param {Object} quest - The encounter quest object
+ * @param {number} missingCount - Number of mobs to respawn
+ * @param {Dimension} dimension - Minecraft dimension to spawn in
+ * @returns {string[]} Array of spawned entity IDs
+ */
+export function respawnMissingMobs(quest, missingCount, dimension) {
+  if (!quest.spawnData || !quest.spawnData.location) {
+    console.error(`[EncounterSpawner] Cannot respawn missing mobs - no spawn location stored`);
+    return [];
+  }
+
+  if (missingCount <= 0) return [];
+
+  const location = quest.spawnData.location;
+  const spawnedEntityIds = [];
+  let mobsToSpawn = missingCount;
+
+  for (const mobGroup of quest.encounterMobs) {
+    if (mobsToSpawn <= 0) break;
+
+    const countFromGroup = Math.min(mobGroup.count, mobsToSpawn);
+
+    for (let i = 0; i < countFromGroup; i++) {
+      const variance = {
+        x: (Math.random() - 0.5) * 6,
+        z: (Math.random() - 0.5) * 6
+      };
+
+      const spawnPos = {
+        x: location.x + variance.x,
+        y: location.y,
+        z: location.z + variance.z
+      };
+
+      try {
+        const entity = dimension.spawnEntity(mobGroup.type, spawnPos);
+
+        entity.addTag(TAG_ENCOUNTER_MOB);
+        entity.addTag(`${TAG_QUEST_PREFIX}${quest.id}`);
+
+        // Apply fire resistance to undead mobs (prevents sunlight burning)
+        applyFireResistance(entity);
+
+        if (mobGroup.nameTag) {
+          entity.nameTag = mobGroup.nameTag;
+        }
+
+        spawnedEntityIds.push(entity.id);
+      } catch (error) {
+        console.error(`[EncounterSpawner] Failed to respawn missing ${mobGroup.type}: ${error}`);
+      }
+    }
+
+    mobsToSpawn -= countFromGroup;
+  }
+
+  if (spawnedEntityIds.length > 0) {
+    console.log(`[EncounterSpawner] Respawned ${spawnedEntityIds.length}/${missingCount} missing mobs for quest ${quest.id}`);
+  }
+
+  return spawnedEntityIds;
+}
+
 // ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================

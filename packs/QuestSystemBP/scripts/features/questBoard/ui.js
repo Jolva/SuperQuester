@@ -132,6 +132,9 @@ export async function showActiveTab(player, actions, isStandalone, deps) {
     if (isComplete) {
       form.button(`§aTurn In: ${quest.title}§r`, TEXTURES.COMPLETE);
       actions.push({ type: "turnIn", fromStandalone: isStandalone });
+
+      form.button("§cManage / Abandon§r", "textures/quest_ui/button_abandon");
+      actions.push({ type: "manage", fromStandalone: isStandalone });
     } else {
       const progressStr = `${data.progress}/${quest.requiredCount}`;
       form.button(`${colors.button}${quest.title}\n§8${progressStr}§r`, icon);
