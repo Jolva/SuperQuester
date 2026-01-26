@@ -29,7 +29,7 @@ export function showQuestMasterDialog(player, deps, showTutorialPageCallback) {
   const { TEXTURES, showQuestBoard } = deps;
 
   const form = new ActionFormData()
-    .title("§5§lAtlas")
+    .title("§lAtlas")
     .body(
       "§7Greetings, adventurer! I am the keeper of the Quest Board, Atlas.\n\n" +
       "§fSelect a topic to learn more:"
@@ -127,8 +127,8 @@ export function handleAtlasInteract(ev, deps, showQuestMasterDialogCallback) {
   lastInteractTime.set(player.name + "_npc", now);
 
   // Auto-name the NPC
-  if (entity.nameTag !== "§5Atlas") {
-    entity.nameTag = "§5Atlas";
+  if (entity.nameTag !== "Atlas") {
+    entity.nameTag = "Atlas";
   }
 
   // Play sounds

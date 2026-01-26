@@ -140,6 +140,9 @@ import {
   handleAtlasInteract as handleAtlasInteractBase
 } from "./features/tutorials/atlasNpc.js";
 
+// Update Sheep NPC
+import { handleUpdateSheepInteract } from "./features/updateSheep/updateSheep.js";
+
 // Ambient systems
 import { initializeTownMusicLoop, initializeSPSSMusicLoop } from "./features/ambient/music.js";
 import { initializeDogBarkingLoop, initializeCatSquadLoop } from "./features/ambient/atmosphericSounds.js";
@@ -1754,6 +1757,42 @@ function bootstrap() {
 }
 
 // === ADMIN COMMANDS ===
+
+/**
+ * Update Sheep NPC interaction handler.
+ * Triggered when a player interacts with the Update Sheep entity.
+ */
+system.afterEvents.scriptEventReceive.subscribe((event) => {
+  if (event.id === "sq:update_sheep_interact") {
+    handleUpdateSheepInteract(event);
+  }
+});
+
+/**
+ * Update Sheep spawn handler.
+ * Sets the name tag when the entity spawns.
+ */
+system.afterEvents.scriptEventReceive.subscribe((event) => {
+  if (event.id === "sq:update_sheep_spawned") {
+    const entity = event.sourceEntity;
+    if (entity && entity.typeId === "quest:update_sheep") {
+      entity.nameTag = "Update Sheep™";
+    }
+  }
+});
+
+/**
+ * Atlas spawn handler.
+ * Sets the name tag when the entity spawns.
+ */
+system.afterEvents.scriptEventReceive.subscribe((event) => {
+  if (event.id === "quest:atlas_spawned") {
+    const entity = event.sourceEntity;
+    if (entity && entity.typeId === "quest:quest_master") {
+      entity.nameTag = "Atlas";
+    }
+  }
+});
 
 /**
  * Admin scriptevent handler for giving SP to players.

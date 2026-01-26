@@ -82,6 +82,16 @@
         }
       ]
     },
+    "ui.npc_update_sheep_greet": {
+      "category": "neutral",
+      "sounds": [
+        {
+          "name": "sounds/ui/npc_update_sheep_greet",
+          "volume": 1.0,
+          "load_on_low_memory": true
+        }
+      ]
+    },
     "quest.accept_rare": {
       "category": "player",
       "sounds": [
