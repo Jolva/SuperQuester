@@ -92,6 +92,66 @@
         }
       ]
     },
+    "ui.npc_update_sheep_tos_intro": {
+      "category": "neutral",
+      "sounds": [
+        {
+          "name": "sounds/ui/npc_update_sheep_tos_intro",
+          "volume": 1.0,
+          "load_on_low_memory": true
+        }
+      ]
+    },
+    "ui.npc_update_sheep_accept": {
+      "category": "neutral",
+      "sounds": [
+        {
+          "name": "sounds/ui/npc_update_sheep_accept",
+          "volume": 1.0,
+          "load_on_low_memory": true
+        }
+      ]
+    },
+    "ui.npc_update_sheep_tos_decline": {
+      "category": "neutral",
+      "sounds": [
+        {
+          "name": "sounds/ui/npc_update_sheep_tos_decline",
+          "volume": 1.0,
+          "load_on_low_memory": true
+        }
+      ]
+    },
+    "ui.npc_update_sheep_decline_v2": {
+      "category": "neutral",
+      "sounds": [
+        {
+          "name": "sounds/ui/npc_update_sheep_decline_v2",
+          "volume": 1.0,
+          "load_on_low_memory": true
+        }
+      ]
+    },
+    "ui.npc_update_sheep_return_not_agreed": {
+      "category": "neutral",
+      "sounds": [
+        {
+          "name": "sounds/ui/npc_update_sheep_return_not_agreed",
+          "volume": 1.0,
+          "load_on_low_memory": true
+        }
+      ]
+    },
+    "ui.npc_update_sheep_bah_bah": {
+      "category": "neutral",
+      "sounds": [
+        {
+          "name": "sounds/ui/npc_update_sheep_bah_bah",
+          "volume": 0.8,
+          "load_on_low_memory": true
+        }
+      ]
+    },
     "quest.accept_rare": {
       "category": "player",
       "sounds": [

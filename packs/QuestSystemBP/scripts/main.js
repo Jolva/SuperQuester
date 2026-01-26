@@ -631,7 +631,9 @@ function ensureQuestData(player) {
         freeRerollAvailable: true,
         paidRerollsThisCycle: 0,
         lifetimeCompleted: 0,
-        currentSP: 0  // Backup of SP balance (synced with scoreboard)
+        currentSP: 0,  // Backup of SP balance (synced with scoreboard)
+        updateSheepTOSAccepted: false,  // Update Sheep TOS acceptance status
+        updateSheepTOSPrompted: false   // Tracks if player has seen TOS before
       };
 
       // Clear old data
@@ -650,7 +652,9 @@ function ensureQuestData(player) {
         freeRerollAvailable: true,  // Start with 1 free reroll
         paidRerollsThisCycle: 0,
         lifetimeCompleted: 0,
-        currentSP: 0  // Backup of SP balance (synced with scoreboard)
+        currentSP: 0,  // Backup of SP balance (synced with scoreboard)
+        updateSheepTOSAccepted: false,  // Update Sheep TOS acceptance status
+        updateSheepTOSPrompted: false   // Tracks if player has seen TOS before
       };
 
       PersistenceManager.saveQuestData(player, data);
@@ -1764,7 +1768,7 @@ function bootstrap() {
  */
 system.afterEvents.scriptEventReceive.subscribe((event) => {
   if (event.id === "sq:update_sheep_interact") {
-    handleUpdateSheepInteract(event);
+    handleUpdateSheepInteract(event, ensureQuestData, PersistenceManager, lastInteractTime);
   }
 });
 
