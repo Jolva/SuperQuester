@@ -7,7 +7,11 @@
       "is_summonable": true,
       "is_experimental": false
     },
-    "component_groups": {},
+    "component_groups": {
+      "named": {
+        "minecraft:is_hidden_when_invisible": {}
+      }
+    },
     "components": {
       "minecraft:type_family": {
         "family": [
@@ -83,6 +87,11 @@
       "quest:on_interact": {
         "queue_command": {
           "command": "scriptevent quest:npc_interact"
+        }
+      },
+      "minecraft:entity_spawned": {
+        "queue_command": {
+          "command": "scriptevent quest:atlas_spawned"
         }
       }
     }

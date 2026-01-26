@@ -1,6 +1,12 @@
 # Minecraft Bedrock Server - Generated Files
 worlds/*
 !worlds/Super Quester World/
+# Ignore world database and runtime files (changes constantly during play)
+worlds/Super Quester World/db/
+worlds/Super Quester World/level.dat
+worlds/Super Quester World/level.dat_old
+worlds/Super Quester World/levelname.txt
+
 # Ignore copied packs inside the world (avoid duplication)
 worlds/Super Quester World/behavior_packs/
 worlds/Super Quester World/resource_packs/

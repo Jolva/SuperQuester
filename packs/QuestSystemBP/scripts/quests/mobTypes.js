@@ -66,8 +66,28 @@ export function getMobType(entity) {
 
   // Illager family
   if (typeId === "pillager" || typeId === "vindicator" ||
-    typeId === "evoker" || typeId === "ravager") {
+    typeId === "evoker" || typeId === "ravager" || typeId === "vex") {
     return "illager";
+  }
+
+  // Hoglin family (includes zoglin for overworld conversion)
+  if (typeId === "hoglin" || typeId === "zoglin") {
+    return "hoglin";
+  }
+
+  // Blaze
+  if (typeId === "blaze") {
+    return "blaze";
+  }
+
+  // Witch
+  if (typeId === "witch") {
+    return "witch";
+  }
+
+  // Phantom
+  if (typeId === "phantom") {
+    return "phantom";
   }
 
   // Default: return the simple type ID

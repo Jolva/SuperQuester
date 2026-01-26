@@ -4,104 +4,24 @@
   "_comment_title": "QUEST SYSTEM - CUSTOM BUTTON TEXTURE OVERRIDE",
   "_comment_header2": "============================================================",
   "_comment_purpose": "This file overrides the default ActionFormData buttons with custom 9-slice textures.",
-  "_comment_how_it_works": "We extend common_buttons.light_text_button to inherit all focus/controller navigation, then override the button content with custom textures.",
+  "_comment_how_it_works": "We define a custom button type with custom background images and override 'dynamic_button' which is the element vanilla uses in server_form for each form button.",
   "_comment_lessons_learned": "=== LESSONS LEARNED (for future agents) ===",
-  "_comment_lesson1": "1. ALWAYS extend from common_buttons.light_text_button for form buttons - it has all controller/focus mappings built in.",
-  "_comment_lesson2": "2. Override the $default_texture, $hover_texture, $pressed_texture variables OR use $button_content to replace the button internals.",
-  "_comment_lesson3": "3. Use 'font_type: smooth' for crisp text rendering that matches vanilla.",
-  "_comment_lesson4": "4. The 'nineslice_size' value should be ~12-16% of the texture size for good corner preservation.",
-  "_comment_lesson5": "5. Button hover/pressed states use 'color' multiplier: >1.0 = brighter, <1.0 = darker.",
-  "_comment_lesson6": "6. Do NOT set focus_container on dynamic_button - let the button itself handle focus.",
-  "_comment_lesson7": "7. Controller support requires button_mappings for focused state, which common_buttons provides.",
-  "_comment_textures_section": "=== BACKGROUND TEXTURE CONTENT PANELS ===",
+  "_comment_lesson1": "1. Custom buttons CAN use custom textures - define type:button with default_control/hover_control/pressed_control.",
+  "_comment_lesson2": "2. Controller support requires button_mappings array with menu_select AND menu_ok mappings.",
+  "_comment_lesson3": "3. Add focus_enabled:true for D-pad navigation between buttons.",
+  "_comment_lesson4": "4. Use 'font_type: smooth' for crisp text rendering that matches vanilla.",
+  "_comment_lesson5": "5. The 'nineslice_size' value should be ~12-16% of the texture size for good corner preservation.",
+  "_comment_lesson6": "6. Button hover/pressed states use 'color' multiplier: >1.0 = brighter, <1.0 = darker.",
+  "_comment_lesson7": "7. Do NOT extend common_buttons.light_text_button if you need custom background textures - it won't apply them.",
+  "_comment_lesson8": "8. This override ONLY affects ActionFormData buttons. MessageFormData uses a separate hardcoded UI path.",
+  "_comment_lesson9": "9. To style MessageFormData dialogs, convert them to ActionFormData in your scripts instead.",
+  "_comment_textures_section": "=== TEXTURE PATH ===",
   "_comment_texture_path": "Textures are located at: packs/QuestSystemRP/textures/quest_ui/",
-  "quest_button_content_default": {
-    "type": "panel",
-    "size": [
-      "100%",
-      "100%"
-    ],
-    "controls": [
-      {
-        "bg": {
-          "type": "image",
-          "texture": "textures/quest_ui/quest_button_common",
-          "size": [
-            "100%",
-            "100%"
-          ],
-          "nineslice_size": 10,
-          "layer": 1
-        }
-      },
-      {
-        "text@common_buttons.default_text": {}
-      }
-    ]
-  },
-  "quest_button_content_hover": {
-    "type": "panel",
-    "size": [
-      "100%",
-      "100%"
-    ],
-    "controls": [
-      {
-        "bg": {
-          "type": "image",
-          "texture": "textures/quest_ui/quest_button_common",
-          "size": [
-            "100%",
-            "100%"
-          ],
-          "nineslice_size": 10,
-          "layer": 1,
-          "color": [
-            1.3,
-            1.3,
-            1.3,
-            1.0
-          ]
-        }
-      },
-      {
-        "text@common_buttons.hover_text": {}
-      }
-    ]
-  },
-  "quest_button_content_pressed": {
-    "type": "panel",
-    "size": [
-      "100%",
-      "100%"
-    ],
-    "controls": [
-      {
-        "bg": {
-          "type": "image",
-          "texture": "textures/quest_ui/quest_button_common",
-          "size": [
-            "100%",
-            "100%"
-          ],
-          "nineslice_size": 10,
-          "layer": 1,
-          "color": [
-            0.7,
-            0.7,
-            0.7,
-            1.0
-          ]
-        }
-      },
-      {
-        "text@common_buttons.pressed_text": {}
-      }
-    ]
-  },
   "_comment_button_section": "=== CUSTOM BUTTON DEFINITION ===",
-  "_comment_button_extends": "Extends common_buttons.light_text_button to inherit all controller/keyboard/focus support",
-  "quest_form_button@common_buttons.light_text_button": {
+  "_comment_button_structure": "Custom button with dark textures + controller support via button_mappings and focus properties",
+  "_comment_controller_fix": "button_mappings wires controller A button to click; focus_enabled allows D-pad navigation",
+  "quest_form_button": {
+    "type": "button",
     "$pressed_button_name": "button.form_button_click",
     "anchor_from": "top_left",
     "anchor_to": "top_left",
@@ -110,27 +30,84 @@
       32
     ],
     "layer": 2,
-    "$button_text": "#form_button_text",
-    "$button_text_binding_type": "collection",
-    "$button_text_grid_collection_name": "form_buttons",
-    "$button_text_max_size": [
-      "100%",
-      20
+    "default_control": "default",
+    "hover_control": "hover",
+    "pressed_control": "pressed",
+    "focus_enabled": true,
+    "focus_wrap_enabled": false,
+    "focus_magnet_enabled": true,
+    "controls": [
+      {
+        "default": {
+          "type": "image",
+          "texture": "textures/quest_ui/quest_button_common",
+          "size": ["100%", "100%"],
+          "nineslice_size": 4,
+          "layer": 1
+        }
+      },
+      {
+        "hover": {
+          "type": "image",
+          "texture": "textures/quest_ui/quest_button_common_hover",
+          "size": ["100%", "100%"],
+          "nineslice_size": 4,
+          "layer": 1
+        }
+      },
+      {
+        "pressed": {
+          "type": "image",
+          "texture": "textures/quest_ui/quest_button_common",
+          "size": ["100%", "100%"],
+          "nineslice_size": 4,
+          "layer": 1,
+          "color": [0.7, 0.7, 0.7, 1.0]
+        }
+      },
+      {
+        "button_label": {
+          "type": "label",
+          "layer": 10,
+          "offset": [0, -2],
+          "shadow": true,
+          "text": "#form_button_text",
+          "color": [1.0, 1.0, 1.0, 1.0],
+          "font_type": "smooth",
+          "font_scale_factor": 1.0,
+          "bindings": [
+            {
+              "binding_name": "#form_button_text",
+              "binding_type": "collection",
+              "binding_collection_name": "form_buttons"
+            }
+          ]
+        }
+      }
     ],
-    "$default_button_content": "server_form.quest_button_content_default",
-    "$hover_button_content": "server_form.quest_button_content_hover",
-    "$pressed_button_content": "server_form.quest_button_content_pressed",
     "bindings": [
       {
         "binding_type": "collection_details",
         "binding_collection_name": "form_buttons"
+      }
+    ],
+    "button_mappings": [
+      {
+        "from_button_id": "button.menu_select",
+        "to_button_id": "$pressed_button_name",
+        "mapping_type": "pressed"
+      },
+      {
+        "from_button_id": "button.menu_ok",
+        "to_button_id": "$pressed_button_name",
+        "mapping_type": "pressed"
       }
     ]
   },
   "_comment_override_section": "=== DYNAMIC BUTTON OVERRIDE ===",
   "_comment_dynamic_button": "This overrides the vanilla 'dynamic_button' element from server_form.json.",
   "_comment_icon_panel": "panel_name contains the icon image (from ActionFormData button textures).",
-  "_comment_form_button": "form_button uses our custom quest_form_button which extends common_buttons.light_text_button.",
+  "_comment_form_button": "form_button uses our custom quest_form_button with dark textures and controller support.",
   "dynamic_button": {
     "type": "stack_panel",
     "size": [
@@ -219,10 +196,7 @@
     ]
   },
   "_comment_future_section": "=== FUTURE ENHANCEMENTS ===",
-  "_comment_future1": "To add rarity-based button textures (legendary, rare, epic):",
-  "_comment_future2": "1. Create texture files: quest_button_legendary.png, quest_button_rare.png, etc.",
-  "_comment_future3": "2. Create new content panels like quest_button_content_legendary_default, etc.",
-  "_comment_future4": "3. Create new button types like quest_form_button_legendary that use those content panels.",
-  "_comment_future5": "4. Modify the form generation in main.js to pass a rarity indicator.",
-  "_comment_future6": "5. Use bindings or separate button factories to select the right button based on rarity."
+  "_comment_future1": "To add a pressed state texture: Create quest_button_common_pressed.png and update the pressed control.",
+  "_comment_future2": "To add rarity-based button textures: Would require dynamic texture selection via bindings (complex).",
+  "_comment_future3": "Note: JSON UI is being deprecated in favor of Ore UI. These customizations may break in future versions."
 }

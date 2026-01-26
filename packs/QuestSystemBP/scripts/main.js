@@ -51,8 +51,8 @@
  */
 
 import { world, system, ItemStack, DisplaySlotId } from "@minecraft/server";
-import { ActionFormData, MessageFormData } from "@minecraft/server-ui";
-import { getMobType } from "./quests/mobTypes.js";
+import { ActionFormData } from "@minecraft/server-ui";
+import { getMobType } from "./features/quests/mobTypes.js";
 import { registerSafeZoneEvents, handleSafeZoneCommand } from "./safeZone.js";
 import { PersistenceManager } from "./systems/PersistenceManager.js";
 import { QuestGenerator } from "./systems/QuestGenerator.js";
@@ -69,6 +69,15 @@ import {
     setModifySPReference
 } from "./systems/SPManager.js";
 
+// Celebration System
+import {
+    celebrateSPGain,
+    celebrateQuestComplete
+} from "./systems/CelebrationManager.js";
+
+// SP Count-Up Animation
+import * as SPAnimator from "./systems/SPAnimator.js";
+
 import {
     calculateCompletionReward,
     rollRarity
@@ -82,6 +91,98 @@ import {
 } from "./systems/StreakTracker.js";
 
 import { COSTS, STREAK_CONFIG } from "./data/EconomyConfig.js";
+
+// === PHASE 1: DATA TABLE IMPORTS ===
+import { TEXTURES, CATEGORY_TEXTURES } from "./data/textures.js";
+import { tutorials } from "./data/tutorials.js";
+
+// === PHASE 2: EVENT SYSTEM IMPORTS ===
+import { registerEvents } from "./events/registerEvents.js";
+
+// === PHASE 3: FEATURE IMPORTS ===
+import {
+  registerPlayerName,
+  lookupPlayerName,
+  getLeaderboardEntries,
+  showLeaderboardTab,
+  getUnknownLeaderboardEntries,
+  setPlayerNameRegistryEntry,
+  pruneUnknownZeroScoreEntries
+} from "./features/leaderboard/leaderboardService.js";
+
+// Quest Board UI and routing
+import { BLOCK_MENU_MAP } from "./features/questBoard/routing.js";
+import {
+  showQuestBoard as showQuestBoardUI,
+  showAvailableTab,
+  showActiveTab,
+  showQuestDetails,
+  showManageQuest
+} from "./features/questBoard/ui.js";
+import { handleUiAction as handleUiActionBase } from "./features/questBoard/actions.js";
+
+// Quest system
+import { getQuestIcon as getQuestIconBase, getQuestColors as getQuestColorsBase } from "./features/quests/formatters.js";
+import {
+  calculateRerollPrice as calculateRerollPriceBase,
+  handleRefresh as handleRefreshBase,
+  handleQuestAccept as handleQuestAcceptBase,
+  handleQuestAbandon as handleQuestAbandonBase
+} from "./features/quests/questLifecycle.js";
+
+// HUD system
+import { updateSPDisplay as updateSPDisplayBase, updateQuestHud as updateQuestHudBase, sendSPDisplayValue } from "./features/hud/hudManager.js";
+
+// Tutorial system
+import {
+  showQuestMasterDialog as showQuestMasterDialogBase,
+  showTutorialPage as showTutorialPageBase,
+  handleAtlasInteract as handleAtlasInteractBase
+} from "./features/tutorials/atlasNpc.js";
+
+// Update Sheep NPC
+import { handleUpdateSheepInteract } from "./features/updateSheep/updateSheep.js";
+
+// Ambient systems
+import { initializeTownMusicLoop, initializeSPSSMusicLoop } from "./features/ambient/music.js";
+import { initializeDogBarkingLoop, initializeCatSquadLoop } from "./features/ambient/atmosphericSounds.js";
+import { registerChatCommands } from "./features/debug/chatCommands.js";
+
+// Debug commands
+import {
+  handleBuilderCommand,
+  handleForceDailyCommand,
+  handleRegisterNamesCommand,
+  handleListUnknownLeaderboardCommand,
+  handleSetLeaderboardNameCommand,
+  handlePruneUnknownLeaderboardCommand,
+  handleAdminGiveSP as handleAdminGiveSPBase
+} from "./features/debug/commands.js";
+
+// === PHASE 3 & 4: ENCOUNTER SYSTEM IMPORTS ===
+// Spawner functions (mob management)
+import {
+  spawnEncounterMobs,
+  despawnEncounterMobs,
+  respawnRemainingMobs,
+  respawnMissingMobs,
+  isEncounterMob,
+  getQuestIdFromMob,
+  countRemainingMobs,
+  initializeEncounterMobProtection,
+  cleanupOrphanedMobs
+} from "./systems/EncounterSpawner.js";
+
+// Location functions (zone selection, terrain validation)
+import {
+  selectEncounterZone,
+  calculateDistance,
+  getQuestBoardPosition,
+  getDirection
+} from "./systems/LocationValidator.js";
+
+// Proximity monitoring (spawn trigger on zone entry)
+import { startProximityMonitoring } from "./systems/EncounterProximity.js";
 
 // =============================================================================
 // CONSTANTS — WORLD LOCATIONS
@@ -109,6 +210,21 @@ const TOWN_MUSIC_SOUND_ID = "questboard.music.town";
 const TRACK_DURATION_TICKS = 880; // ~44 seconds (slight overlap for seamless loop)
 const MUSIC_CHECK_INTERVAL = 10;  // Check every 0.5 seconds
 
+// --- SPSS Music Zone (Super Points Super Store) ---
+const SPSS_MUSIC_SOUND_ID = "spss.music.store";
+const SPSS_TRACK_DURATION_TICKS = 880; // ~44 seconds (adjust based on your track length)
+const SPSS_MUSIC_CHECK_INTERVAL = 10;  // Check every 0.5 seconds
+// SPSS Zone Boundaries - CUSTOMIZE THESE COORDINATES!
+// Define the rectangular area of your SPSS store
+const SPSS_ZONE_BOUNDS = {
+  minX: 91,   // Replace with your store's minimum X coordinate
+  maxX: 102,   // Replace with your store's maximum X coordinate
+  minY: 77,   // Replace with your store's minimum Y coordinate (floor level)
+  maxY: 85,   // Replace with your store's maximum Y coordinate (ceiling level)
+  minZ: -294, // Replace with your store's minimum Z coordinate
+  maxZ: -287  // Replace with your store's maximum Z coordinate
+};
+
 // --- Dog Barking Zone (comedic escalation near quest board) ---
 const DOG_SOUNDS = ["atmosphere.dogs_01", "atmosphere.dogs_02", "atmosphere.dogs_03"];
 const MONKEY_SOUNDS = ["atmosphere.monkeys_01"]; // Join the chaos in core zone!
@@ -123,12 +239,12 @@ const DOG_REPLAY_TICKS = 60;    // Replay barking every 3 seconds while in zone
 // Inner ring (2-4 blocks): 3 tracks, loud
 // Core zone (<2 blocks): 3 tracks, FULL CHAOS + bonus barks
 const DOG_DISTANCE_TIERS = [
-  { maxDist: 20, tracks: 1, minVol: 0.025, maxVol: 0.05 },  // Far: barely audible
-  { maxDist: 15, tracks: 1, minVol: 0.05, maxVol: 0.075 },  // Outer: faint
-  { maxDist: 10, tracks: 2, minVol: 0.075, maxVol: 0.125 }, // Mid-outer: gentle
-  { maxDist: 6, tracks: 2, minVol: 0.125, maxVol: 0.175 },  // Mid: moderate
-  { maxDist: 4, tracks: 3, minVol: 0.175, maxVol: 0.225 },  // Inner: loud
-  { maxDist: 2, tracks: 3, minVol: 0.18, maxVol: 0.22 },    // Core: chaos (50% reduction)
+  { maxDist: 20, tracks: 1, minVol: 0.006, maxVol: 0.012 },  // Far: barely audible
+  { maxDist: 15, tracks: 1, minVol: 0.012, maxVol: 0.018 },  // Outer: faint
+  { maxDist: 10, tracks: 2, minVol: 0.018, maxVol: 0.03 },   // Mid-outer: gentle
+  { maxDist: 6, tracks: 2, minVol: 0.03, maxVol: 0.04 },     // Mid: moderate
+  { maxDist: 4, tracks: 3, minVol: 0.04, maxVol: 0.055 },    // Inner: loud
+  { maxDist: 2, tracks: 3, minVol: 0.045, maxVol: 0.055 },   // Core: chaos
 ];
 const DOG_MAX_RADIUS = 20; // Full safe zone coverage!
 
@@ -138,6 +254,10 @@ const DOG_MAX_RADIUS = 20; // Full safe zone coverage!
 const CAT_CHECK_INTERVAL = 20; // Check every 20 ticks (1 second)
 const CAT_MAX_RADIUS = 20; // Full safe zone coverage!
 const CAT_SPAWN_RADIUS = 1.5; // How far from player to spawn cats
+
+// === ENCOUNTER PERSISTENCE MONITOR ===
+const ENCOUNTER_PERSISTENCE_CHECK_INTERVAL = 200; // 10 seconds
+const ENCOUNTER_PERSISTENCE_MAX_DISTANCE = 96; // Only respawn when player is near the spawn area
 
 // Distance tiers: [maxDistance, numberOfCats]
 // Expanded to cover full 20-block safe zone!
@@ -171,95 +291,12 @@ const CAT_VARIANTS = [
   "minecraft:cat_black"
 ];
 
-
-// Log on world load (Kept from original main.js)
-world.afterEvents.worldInitialize.subscribe(() => {
-  console.warn('Quest System BP loaded successfully');
-  world.setDefaultSpawnLocation(HUB_SPAWN_LOCATION);
-
-  // Initialize SP economy systems
-  initializeSPObjective();
-  initializeStreakTracking();
-});
-
-// Load data when player joins AND handle spawn location
-world.afterEvents.playerSpawn.subscribe((ev) => {
-  const { player, initialSpawn } = ev;
-
-  // Only force teleport to hub on INITIAL spawn (first time joining)
-  // Respawns (after death/sleep) will use bed spawn if set, otherwise world spawn
-  if (initialSpawn) {
-    system.runTimeout(() => {
-      try {
-        player.teleport(HUB_SPAWN_LOCATION, {
-          rotation: HUB_SPAWN_ROTATION,
-          checkForBlocks: true
-        });
-      } catch (e) {
-        console.warn(`[Spawn] Failed to teleport ${player.name}: ${e}`);
-      }
-    }, 5); // Small delay to ensure player is fully loaded
-  }
-
-  // Register player name for leaderboard (fixes offline player name display)
-  // Also initialize SP (handles backup recovery if scoreboard was wiped)
-  system.runTimeout(() => {
-    registerPlayerName(player);
-    initializePlayerSP(player);
-
-    // Clear any stuck animation state from previous session
-    playerAnimationState.delete(player.id);
-
-    // Update SP HUD display after initialization - force reset to frame 0
-    system.runTimeout(() => {
-      const sp = getSP(player);
-      // Clear any cached title first
-      player.runCommandAsync(`titleraw @s clear`);
-      // Small delay then send static display
-      system.runTimeout(() => {
-        player.runCommandAsync(`titleraw @s times 0 1 0`);
-        player.runCommandAsync(`titleraw @s title {"rawtext":[{"text":"SPVAL:${sp}"}]}`);
-        console.warn(`[SP] Initialized display for ${player.name} at ${sp} SP (frame 0)`);
-      }, 5);
-    }, 20); // 1 second delay for player to be fully ready
-  }, 10); // Delay to ensure scoreboard identity is ready
-
-  // Load quest data using the NEW format
-  system.runTimeout(() => {
-    const data = ensureQuestData(player);
-
-    // Resume HUD if player has an active kill/mine quest in progress
-    if (data && data.active) {
-      const quest = data.active;
-      if ((quest.type === "kill" || quest.type === "mine") && data.progress < quest.requiredCount) {
-        updateQuestHud(player, {
-          ...quest,
-          progress: data.progress,
-          goal: quest.requiredCount,
-          status: "active"
-        });
-      }
-    }
-  }, 15); // Slightly longer delay to ensure everything is ready
-});
-
-// Clean up music state and despawn cats when player leaves
-world.afterEvents.playerLeave.subscribe((ev) => {
-  const playerId = ev.playerId;
-  playerMusicState.delete(playerId);
-  playerDogBarkState.delete(playerId);
-
-  // Despawn any guardian cats
-  const catSquad = playerCatSquad.get(playerId);
-  if (catSquad && catSquad.cats) {
-    catSquad.cats.forEach(cat => {
-      try {
-        if (cat.isValid()) cat.remove();
-      } catch (e) { /* cat already gone */ }
-    });
-  }
-  playerCatSquad.delete(playerId);
-});
+// =============================================================================
+// NOTE: World lifecycle event subscriptions have been moved to registerEvents.js (Phase 2)
+// - world.afterEvents.worldInitialize → handleWorldInitialize()
+// - world.afterEvents.playerSpawn → handlePlayerSpawn()  
+// - world.afterEvents.playerLeave → handlePlayerLeave()
+// =============================================================================
 
 // Initialize Daily Quests (Global Daily Quests - REMOVED)
 // let currentAvailableQuests = QuestGenerator.generateDailyQuests(3);
@@ -267,6 +304,9 @@ world.afterEvents.playerLeave.subscribe((ev) => {
 /** -----------------------------
  *  Config
  *  ----------------------------- */
+
+// NOTE: TEXTURES, CATEGORY_TEXTURES, and tutorials
+// have been moved to /data/ modules and imported at the top of this file.
 
 // const MAX_ACTIVE_QUESTS = 2; // REMOVED
 const FALLBACK_COMMAND = "!quests";
@@ -321,66 +361,32 @@ const CATEGORY_TEXTURES = {
   farming: TEXTURES.CATEGORY_FARMING,
 };
 
-const BOARD_TABS = {
-  AVAILABLE: "available",
-  ACTIVE: "active",
-  LEADERBOARD: "leaderboard",
-};
-
 /**
  * Get icon for a quest based on rarity and category
  * @param {Object} quest - Quest object with category and rarity fields
  * @param {boolean} showRarityBadge - If true, legendary/rare quests show rarity icon instead
  * @returns {string} Texture path
  */
-function getQuestIcon(quest, showRarityBadge = false) {
-  // Rarity badge override (for special visual emphasis)
-  if (showRarityBadge) {
-    if (quest.rarity === "mythic") return TEXTURES.MYTHIC;
-    if (quest.rarity === "legendary") return TEXTURES.LEGENDARY;
-    if (quest.rarity === "rare") return TEXTURES.RARE;
-  }
+// =============================================================================
+// Quest formatting helpers (Phase 4 - Wrappers)
+// =============================================================================
 
-  // Category-based icon (primary system)
-  if (quest.category && CATEGORY_TEXTURES[quest.category]) {
-    return CATEGORY_TEXTURES[quest.category];
-  }
+// Wrapper functions to inject dependencies
+function getQuestIconWrapper(quest, showRarityBadge = false) {
+  return getQuestIconBase(quest, showRarityBadge, TEXTURES, CATEGORY_TEXTURES);
+}
 
-  // Fallback to type-based (legacy support)
-  if (quest.type === "kill") return TEXTURES.CATEGORY_UNDEAD;
-  if (quest.type === "mine") return TEXTURES.CATEGORY_MINING;
-  if (quest.type === "gather") return TEXTURES.CATEGORY_GATHERING;
-
-  return TEXTURES.DEFAULT;
+function getQuestColorsWrapper(rarity) {
+  return getQuestColorsBase(rarity);
 }
 
 const LEADERBOARD_ENTRY_LIMIT = 10;
-
-// Color Palettes
-function getQuestColors(rarity) {
-  // Returns { chat: "code", button: "code" }
-  // NOTE: button colors should be light for visibility on custom stone button textures
-  switch (rarity) {
-    case "mythic":
-      return { chat: "§d§l", button: "§d" }; // Light Purple/Light Purple (mythic tier)
-    case "legendary":
-      return { chat: "§6§l", button: "§6" }; // Gold/Gold (already visible)
-    case "rare":
-      return { chat: "§b", button: "§b" };   // Aqua/Aqua (changed from dark blue)
-    case "common":
-    default:
-      return { chat: "§7", button: "§f" };   // Gray chat / White button (changed from black)
-  }
-}
 
 // =============================================================================
 // IN-MEMORY STATE
 // =============================================================================
 // These Maps track per-player runtime state. They are NOT persisted across
 // server restarts — use PersistenceManager for permanent data!
-
-/** Tracks which Quest Board tab each player is viewing. */
-const playerTabState = new Map();
 
 /** 
  * Tracks which player last hit each entity (for kill quest attribution).
@@ -393,6 +399,10 @@ const lastHitPlayerByEntityId = new Map();
 // Tracks per-player music state: { inZone: boolean, nextReplayTick: number }
 const playerMusicState = new Map();
 
+// === SPSS MUSIC ZONE STATE ===
+// Tracks per-player SPSS music state: { inZone: boolean, nextReplayTick: number }
+const playerSPSSMusicState = new Map();
+
 // === DOG BARKING ZONE STATE ===
 // Tracks per-player dog barking state: { inZone: boolean, nextBarkTick: number }
 const playerDogBarkState = new Map();
@@ -401,88 +411,26 @@ const playerDogBarkState = new Map();
 // Tracks per-player spawned cats: { cats: Entity[], lastTier: number }
 const playerCatSquad = new Map();
 
-// === SP ANIMATION STATE ===
-// Tracks per-player animation status to prevent overlapping animations
-const playerAnimationState = new Map();
+// === QUEST DATA CACHE ===
+// In-memory cache of player quest data to prevent race conditions on rapid updates.
+// Map<playerId, QuestData>
+// Loaded from dynamic properties on player join, updated on every quest change,
+// and saved back to dynamic properties. This prevents multiple rapid events
+// (like killing 9 mobs quickly) from overwriting each other's progress.
+const playerQuestDataCache = new Map();
 
 // === PLAYER NAME REGISTRY ===
 // Stores player names in world dynamic properties so leaderboard can display
 // correct names even when players are offline.
 const PLAYER_NAME_REGISTRY_KEY = "superquester:player_names";
 
-/**
- * Loads the player name registry from world dynamic properties.
- * @returns {Object} Map of scoreboard participant ID -> player name
- */
-function loadPlayerNameRegistry() {
-  try {
-    const data = world.getDynamicProperty(PLAYER_NAME_REGISTRY_KEY);
-    if (typeof data === 'string') {
-      return JSON.parse(data);
-    }
-  } catch (e) {
-    console.warn(`[Registry] Failed to load player name registry: ${e}`);
-  }
-  return {};
-}
 
-/**
- * Saves the player name registry to world dynamic properties.
- * @param {Object} registry - Map of scoreboard participant ID -> player name
- */
-function savePlayerNameRegistry(registry) {
-  try {
-    world.setDynamicProperty(PLAYER_NAME_REGISTRY_KEY, JSON.stringify(registry));
-  } catch (e) {
-    console.warn(`[Registry] Failed to save player name registry: ${e}`);
-  }
-}
 
-/**
- * Registers a player's name in the registry using their scoreboard identity.
- * Should be called when a player joins/spawns.
- * @param {import("@minecraft/server").Player} player
- */
-function registerPlayerName(player) {
-  if (!player || !player.isValid()) return;
 
-  // We need the player to have a scoreboard identity to map correctly.
-  // If they don't have one yet, we'll create it by adding 0 points.
-  const objective = world.scoreboard.getObjective(SCOREBOARD_OBJECTIVE_ID);
-  if (!objective) return;
 
-  try {
-    // Ensure player has a scoreboard identity by adding 0 if they don't have one
-    if (!player.scoreboardIdentity) {
-      player.runCommandAsync(`scoreboard players add @s ${SCOREBOARD_OBJECTIVE_ID} 0`).catch(() => { });
-      // The identity won't be available until next tick, so we'll try again
-      system.runTimeout(() => registerPlayerName(player), 5);
-      return;
-    }
 
-    const registry = loadPlayerNameRegistry();
-    const participantId = player.scoreboardIdentity.id.toString();
 
-    // Only update if name changed or new entry
-    if (registry[participantId] !== player.name) {
-      registry[participantId] = player.name;
-      savePlayerNameRegistry(registry);
-      // console.warn(`[Registry] Registered player: ${player.name} (ID: ${participantId})`);
-    }
-  } catch (e) {
-    console.warn(`[Registry] Failed to register player ${player.name}: ${e}`);
-  }
-}
 
-/**
- * Looks up a player name from the registry.
- * @param {string} participantId - The scoreboard participant ID
- * @returns {string|null} The player name or null if not found
- */
-function lookupPlayerName(participantId) {
-  const registry = loadPlayerNameRegistry();
-  return registry[participantId.toString()] || null;
-}
 
 /** -----------------------------
  *  Super Points (SP) Helpers
@@ -504,23 +452,25 @@ function getSP(player) {
 /**
  * Modifies a player's Super Points balance.
  * Updates both the scoreboard (authoritative) and dynamic property backup.
- * 
+ *
  * @param {import("@minecraft/server").Player} player - The player to modify
  * @param {number} delta - Amount to add (positive) or subtract (negative)
+ * @param {Object} options - Optional configuration (e.g., skipCelebration)
  * @returns {number} The new balance
  */
-function modifySP(player, delta) {
+function modifySP(player, delta, options = {}) {
   const objective = world.scoreboard.getObjective(SCOREBOARD_OBJECTIVE_ID);
   if (!objective) {
     console.warn("[SP] Cannot modify SP - objective not found");
     return 0;
   }
 
-  // Get current balance
+  // Capture old value BEFORE modification for animation
   let current = 0;
   if (player.scoreboardIdentity) {
     current = objective.getScore(player.scoreboardIdentity) ?? 0;
   }
+  const oldValue = current;
 
   // Calculate new balance (floor at 0)
   const newBalance = Math.max(0, current + delta);
@@ -528,15 +478,33 @@ function modifySP(player, delta) {
   // Update scoreboard
   objective.setScore(player, newBalance);
 
-  // Update backup in dynamic properties
-  const data = PersistenceManager.loadQuestData(player);
+  // Ensure player is registered in leaderboard name registry
+  // This is critical for script events that modify SP directly
+  registerPlayerName(player);
+
+  // Update backup in dynamic properties using cache
+  const data = ensureQuestData(player);
   if (data) {
     data.currentSP = newBalance;
     PersistenceManager.saveQuestData(player, data);
   }
 
-  // Update HUD display with spinning coin animation
-  updateSPDisplayWithAnimation(player);
+  // Animated display update for gains, instant for losses
+  if (delta > 0) {
+    updateSPDisplay(player, newBalance, { 
+      animate: true, 
+      oldValue: oldValue 
+    });
+  } else {
+    updateSPDisplay(player, newBalance, { animate: false });
+  }
+
+  // Celebration feedback for SP gains (with delay to let animation start)
+  if (delta > 0 && !options.skipCelebration) {
+    system.runTimeout(() => {
+      celebrateSPGain(player, delta);
+    }, 5);  // 5-tick delay (~0.25s) to coordinate with count-up
+  }
 
   return newBalance;
 }
@@ -582,155 +550,41 @@ function initializePlayerSP(player) {
 }
 
 /**
- * SP HUD DISPLAY SYSTEM (STATIC)
- * ===============================
- * Sends the player's SP value via titleraw for JSON UI display WITHOUT animation.
- * Used ONLY on player join/respawn to set initial static state.
- * 
+ * SP HUD DISPLAY SYSTEM
+ * =====================
+ * Sends the player's SP value via titleraw for JSON UI display.
+ *
  * TITLE BRIDGE PROTOCOL:
- * - Format: "SPVAL:XX" (no frame suffix)
- * - Frame 0 is IMPLICIT when no :N suffix exists
- * - JSON UI detects absence of :1 through :5 and shows sp_coin_0.png
- * 
+ * - Format: "SPVAL:XX"
+ * - JSON UI binds to #hud_title_text_string and extracts the number
+ *
  * HOW IT WORKS:
  * 1. Script API sends "SPVAL:XX" via titleraw (invisible, 1 tick duration)
  * 2. JSON UI (hud_screen.json) binds to #hud_title_text_string (global)
- * 3. String extraction: ('§z' + (#hud_title_text_string - 'SPVAL:')) strips prefix
- * 4. Frame detection: Checks for absence of :1, :2, :3, :4, :5 = shows frame 0
- * 5. Result: Custom HUD shows static coin + number
- * 
- * FILES INVOLVED:
- * - This function in main.js (Script API side)
- * - packs/QuestSystemRP/ui/hud_screen.json (JSON UI side)
- * - packs/QuestSystemRP/textures/quest_ui/sp_coin_0.png through sp_coin_5.png
- * 
- * CALLED FROM:
- * - playerSpawn handler — on join (with titleraw clear first to flush cache)
- * 
- * IMPORTANT:
- * - Do NOT call this during gameplay SP changes - use updateSPDisplayWithAnimation()
- * - Direct scoreboard commands bypass this system entirely
- * 
+ * 3. String extraction: strips "SPVAL:" prefix to display the number
+ * 4. Result: Custom HUD shows static coin + number
+ *
+ * PHASE 3: NOW WITH ANIMATION!
+ * - Supports animated count-up via SPAnimator
+ * - Pass options.animate = true for count-up effect
+ * - Pass options.oldValue for starting point
+ *
  * @param {import("@minecraft/server").Player} player
+ * @param {number} value - SP value to display (if not animating, reads from scoreboard)
+ * @param {Object} options - Animation options
+ * @param {boolean} options.animate - Whether to animate the change
+ * @param {number} options.oldValue - Previous value (required if animate=true)
  */
-function updateSPDisplay(player) {
-  const sp = getSP(player);
-
-  try {
-    // Invisible timing: 0 fade in, 1 tick stay, 0 fade out
-    // JSON UI still captures the value even with minimal duration
-    player.runCommandAsync(`titleraw @s times 0 1 0`);
-
-    // Send title with SP value (no frame suffix = static coin/frame 0)
-    player.runCommandAsync(`titleraw @s title {"rawtext":[{"text":"SPVAL:${sp}"}]}`);
-
-  } catch (e) {
-    console.warn(`[SuperQuester] Failed to update SP display for ${player.name}: ${e}`);
-  }
-}
+// =============================================================================
+// =============================================================================
+// HUD Management (Phase 4 - Wrappers)
+// =============================================================================
 
 /**
- * SP COIN SPINNING ANIMATION (TRIGGERED ON SP CHANGES)
- * =====================================================
- * Plays a 5-frame coin spinning animation when a player's SP value changes.
- * Uses the title bridge protocol extended with frame numbers.
- * 
- * TITLE BRIDGE PROTOCOL EXTENSION:
- * - Static:    "SPVAL:123"   (no suffix = frame 0 implicit)
- * - Animating: "SPVAL:123:1" through "SPVAL:123:5"
- * - Frame 0: Static coin (default state, no :N suffix)
- * - Frames 1-5: Animation sequence (explicit :N suffixes)
- * 
- * ANIMATION FLOW:
- * 1. Check playerAnimationState map to prevent overlapping animations
- * 2. Set animation flag for this player (by player.id)
- * 3. Cycle through frames 1→2→3→4→5 at 4 ticks (200ms) per frame
- * 4. Wait 2 ticks after frame 5 (ensures last frame processes)
- * 5. Return to "SPVAL:XX" (no suffix) = frame 0 static state
- * 6. Clear animation flag in finally block (always executes)
- * 
- * JSON UI BINDING MECHANICS (CRITICAL LEARNINGS):
- * - Uses #hud_title_text_string with "global" binding (NOT collection)
- * - Collection bindings don't work with Bedrock's title system
- * - Frame 0 visibility: String contains "SPVAL:" AND no :1/:2/:3/:4/:5 suffixes
- * - Frames 1-5 visibility: Detects specific suffix with "not" + string subtraction
- * - Pattern: (not ((#string - ':N') = #string)) returns true when :N exists
- * - Value extraction: Strips "SPVAL:" and all frame suffixes (:0 through :5)
- * 
- * TIMING:
- * - 4 ticks per frame = 200ms per frame (at 20 TPS)
- * - Total animation: 1 second (5 frames × 200ms)
- * - 2 tick pause after frame 5 before returning to static
- * - Total duration: ~1.1 seconds
- * 
- * STATE TRACKING:
- * - playerAnimationState Map prevents overlapping animations
- * - Key: player.id, Value: true when animating
- * - Deleted on spawn (clears stuck states) and in finally block
- * 
- * ERROR HANDLING:
- * - Try-catch around entire animation sequence
- * - Fallback to static display on any error
- * - Finally block ensures animation state is ALWAYS cleared
- * - Console logging for debugging (start/complete/error messages)
- * 
- * TRIGGERED BY:
- * - modifySP() function (ONLY way to properly trigger animation)
- * - Quest completion rewards
- * - Reroll purchases (negative SP)
- * - Any game logic that calls modifySP(player, delta)
- * 
- * NOT TRIGGERED BY:
- * - Direct /scoreboard commands (bypasses modifySP)
- * - Player join/spawn (uses updateSPDisplay for static)
- * - Manual scoreboard modifications
- * 
- * KNOWN ISSUES & FIXES:
- * - Title cache on spawn: Fixed with `titleraw @s clear` before setting initial frame
- * - Frame 0 not showing: Fixed by removing :0 suffix (implicit frame 0)
- * - Multiple coins visible: Fixed visibility bindings with proper suffix detection
- * - Animation too fast: Increased from 2 ticks to 4 ticks per frame
- * 
- * @param {import("@minecraft/server").Player} player
+ * Updates SP display with animation support - wrapper
  */
-async function updateSPDisplayWithAnimation(player) {
-  const playerId = player.id;
-  
-  // Skip if already animating to prevent visual overlap
-  if (playerAnimationState.get(playerId)) {
-    return;
-  }
-  
-  playerAnimationState.set(playerId, true);
-  const sp = getSP(player);
-  
-  try {
-    console.warn(`[SP Animation] Starting animation for ${player.name} (SP: ${sp})`);
-    
-    // Spin through animation frames (1-5)
-    for (let frame = 1; frame <= 5; frame++) {
-      player.runCommandAsync(`titleraw @s times 0 1 0`);
-      player.runCommandAsync(`titleraw @s title {"rawtext":[{"text":"SPVAL:${sp}:${frame}"}]}`);
-      await system.waitTicks(4); // ~200ms per frame at 20 TPS (1 second total)
-    }
-    
-    // Small delay before returning to static (ensures last frame is processed)
-    await system.waitTicks(2);
-    
-    // Return to static coin (no frame suffix = frame 0)
-    player.runCommandAsync(`titleraw @s times 0 1 0`);
-    player.runCommandAsync(`titleraw @s title {"rawtext":[{"text":"SPVAL:${sp}"}]}`);
-    
-    console.warn(`[SP Animation] Completed animation for ${player.name}`);
-    
-  } catch (error) {
-    console.warn(`[SP Animation] Error for ${player.name}: ${error}`);
-    // Fallback to static display (no frame suffix)
-    player.runCommandAsync(`titleraw @s title {"rawtext":[{"text":"SPVAL:${sp}"}]}`);
-  } finally {
-    // Always clear animation state, even on error
-    playerAnimationState.delete(playerId);
-  }
+function updateSPDisplay(player, value, options = {}) {
+  return updateSPDisplayBase(player, value, options, getSP, SPAnimator);
 }
 
 /** -----------------------------
@@ -745,11 +599,21 @@ function getPlayerKey(player) {
 /**
  * Ensures player has valid quest data, creating or refreshing as needed.
  * Call this before any quest system access.
+ *
+ * IMPORTANT: Uses in-memory cache to prevent race conditions on rapid updates.
+ * Multiple rapid kills (e.g., 9 mobs dying quickly) will all see the same
+ * cached object instead of reloading stale data from disk.
+ *
  * @param {import("@minecraft/server").Player} player
  * @returns {QuestData}
  */
 function ensureQuestData(player) {
-  // Try new format first
+  // Check cache first to prevent race conditions
+  if (playerQuestDataCache.has(player.id)) {
+    return playerQuestDataCache.get(player.id);
+  }
+
+  // Not in cache - load from persistence
   let data = PersistenceManager.loadQuestData(player);
 
   if (!data) {
@@ -767,7 +631,9 @@ function ensureQuestData(player) {
         freeRerollAvailable: true,
         paidRerollsThisCycle: 0,
         lifetimeCompleted: 0,
-        currentSP: 0  // Backup of SP balance (synced with scoreboard)
+        currentSP: 0,  // Backup of SP balance (synced with scoreboard)
+        updateSheepTOSAccepted: false,  // Update Sheep TOS acceptance status
+        updateSheepTOSPrompted: false   // Tracks if player has seen TOS before
       };
 
       // Clear old data
@@ -786,12 +652,17 @@ function ensureQuestData(player) {
         freeRerollAvailable: true,  // Start with 1 free reroll
         paidRerollsThisCycle: 0,
         lifetimeCompleted: 0,
-        currentSP: 0  // Backup of SP balance (synced with scoreboard)
+        currentSP: 0,  // Backup of SP balance (synced with scoreboard)
+        updateSheepTOSAccepted: false,  // Update Sheep TOS acceptance status
+        updateSheepTOSPrompted: false   // Tracks if player has seen TOS before
       };
 
       PersistenceManager.saveQuestData(player, data);
       console.warn(`[QuestSystem] Initialized quest data for ${player.name}`);
     }
+
+    // Cache the new data
+    playerQuestDataCache.set(player.id, data);
     return data;
   }
 
@@ -818,6 +689,8 @@ function ensureQuestData(player) {
     console.warn(`[QuestSystem] Auto-refreshed quests for ${player.name} (24h expired)`);
   }
 
+  // Cache the loaded/refreshed data
+  playerQuestDataCache.set(player.id, data);
   return data;
 }
 
@@ -849,614 +722,108 @@ function markDailyCompletion(player) {
   PersistenceManager.saveQuestData(player, data);
 }
 
+// =============================================================================
+// Quest Lifecycle (Phase 4 - Wrappers)
+// =============================================================================
+
 /**
- * Calculates SP cost for the next paid reroll.
- * Uses exponential pricing from EconomyConfig.
- * @param {number} paidRerollsThisCycle
- * @returns {number} SP cost
+ * Calculates SP cost for the next paid reroll - wrapper
  */
 function calculateRerollPrice(paidRerollsThisCycle) {
-  // First N rerolls cost base price
-  if (paidRerollsThisCycle < COSTS.rerollFreeCount) {
-    return COSTS.rerollBase;
-  }
-
-  // Subsequent rerolls use exponential pricing
-  // Example with config (100, 2, 2): 100, 100, 200, 400, 800...
-  return COSTS.rerollBase * Math.pow(COSTS.rerollExponent, paidRerollsThisCycle - COSTS.rerollFreeCount);
+  return calculateRerollPriceBase(paidRerollsThisCycle, COSTS);
 }
 
 /**
- * Handles the refresh/reroll button click.
- * @param {import("@minecraft/server").Player} player
- * @returns {boolean} success
+ * Handles the refresh/reroll button click - wrapper
  */
 function handleRefresh(player) {
-  const data = ensureQuestData(player);
-
-  // CASE 1: Free reroll available
-  if (data.freeRerollAvailable) {
-    data.freeRerollAvailable = false;
-    data.available = QuestGenerator.generateDailyQuests(3);
-    data.active = null;
-    data.progress = 0;
-    data.lastRefreshTime = Date.now();
-    data.paidRerollsThisCycle = 0;  // Reset pricing on free use
-    PersistenceManager.saveQuestData(player, data);
-
-    player.sendMessage("§a✓ Used free reroll! Complete all 3 quests to earn another.§r");
-    player.playSound("quest.reroll", { volume: 0.9, pitch: 1.0 });
-    return true;
-  }
-
-  // CASE 2: Paid reroll
-  const price = calculateRerollPrice(data.paidRerollsThisCycle);
-
-  // Attempt purchase using SPManager
-  const purchaseResult = purchase(player, price);
-
-  if (!purchaseResult.success) {
-    player.sendMessage(purchaseResult.message);
-    player.playSound("note.bass", { pitch: 0.5 });
-    return false;
-  }
-
-  data.paidRerollsThisCycle += 1;
-  data.available = QuestGenerator.generateDailyQuests(3);
-  data.active = null;
-  data.progress = 0;
-  data.lastRefreshTime = Date.now();
-  PersistenceManager.saveQuestData(player, data);
-
-  const nextPrice = calculateRerollPrice(data.paidRerollsThisCycle);
-  player.sendMessage(`§a✓ Rerolled for ${price} SP! Next reroll: ${nextPrice} SP§r`);
-  player.playSound("quest.reroll", { volume: 0.9, pitch: 1.0 });
-
-  return true;
+  const deps = {
+    ensureQuestData,
+    QuestGenerator,
+    PersistenceManager,
+    purchase,
+    COSTS
+  };
+  return handleRefreshBase(player, deps);
 }
 
 /**
- * Accepts a quest from the available pool.
- * @param {import("@minecraft/server").Player} player
- * @param {number} questIndex - Index in available array (0, 1, or 2)
- * @returns {{ ok: boolean, reason?: string, quest?: any }}
+ * Accepts a quest from the available pool - wrapper
  */
 function handleQuestAccept(player, questIndex) {
-  const data = ensureQuestData(player);
-
-  // Validate: already have active quest?
-  if (data.active !== null) {
-    return { ok: false, reason: "§cYou already have an active quest! Complete or abandon it first.§r" };
-  }
-
-  // Validate: index in bounds?
-  if (questIndex < 0 || questIndex >= data.available.length) {
-    return { ok: false, reason: "§cInvalid quest selection.§r" };
-  }
-
-  // Validate: slot not empty?
-  const quest = data.available[questIndex];
-  if (quest === null) {
-    return { ok: false, reason: "§cThat quest slot is empty.§r" };
-  }
-
-  // Accept the quest
-  data.active = { ...quest };  // Copy to active
-  data.progress = 0;
-  data.available[questIndex] = null;  // Mark slot as taken
-  PersistenceManager.saveQuestData(player, data);
-
-  // Start HUD if applicable
-  if (quest.type === "kill" || quest.type === "mine") {
-    updateQuestHud(player, { ...data.active, progress: 0, goal: quest.requiredCount, status: "active" });
-  }
-
-  return { ok: true, quest: quest };
+  const deps = {
+    ensureQuestData,
+    PersistenceManager,
+    selectEncounterZone,
+    getQuestBoardPosition,
+    calculateDistance,
+    getDirection,
+    world,
+    updateQuestHud
+  };
+  return handleQuestAcceptBase(player, questIndex, deps);
 }
 
 /**
- * Abandons the active quest and returns it to the available pool.
- * @param {import("@minecraft/server").Player} player
- * @returns {any|null} The abandoned quest, or null if none active
+ * Abandons the active quest - wrapper
  */
 function handleQuestAbandon(player) {
-  const data = ensureQuestData(player);
-
-  if (!data.active) {
-    player.sendMessage("§cNo active quest to abandon.§r");
-    return null;
-  }
-
-  const quest = data.active;
-
-  // Find an empty slot to return it to (or first slot if somehow all full)
-  const emptyIndex = data.available.findIndex(slot => slot === null);
-  if (emptyIndex !== -1) {
-    data.available[emptyIndex] = quest;
-  } else {
-    // Edge case: No empty slots (shouldn't happen if accept logic is correct, but safe fallback: put in slot 0)
-    data.available[0] = quest;
-  }
-
-  data.active = null;
-  data.progress = 0;
-  PersistenceManager.saveQuestData(player, data);
-
-  player.onScreenDisplay?.setActionBar?.("");
-
-  // Play abandon sound
-  player.playSound("quest.abandon", { volume: 0.8, pitch: 1.0 });
-
-  return quest;
-}
-
-function setPlayerTab(player, tab) {
-  playerTabState.set(getPlayerKey(player), tab);
-}
-
-function getPlayerTab(player) {
-  const key = getPlayerKey(player);
-  if (playerTabState.has(key)) return playerTabState.get(key);
-
-  const data = ensureQuestData(player);
-  // Default logic: if has active quests, go to Active, else Available
-  const hasActive = data.active !== null;
-  return hasActive ? BOARD_TABS.ACTIVE : BOARD_TABS.AVAILABLE;
+  const deps = {
+    ensureQuestData,
+    PersistenceManager,
+    world,
+    despawnEncounterMobs
+  };
+  return handleQuestAbandonBase(player, deps);
 }
 
 /** -----------------------------
- *  UI helpers
+ *  Quest Board UI (Phase 3B - Wrappers)
  *  ----------------------------- */
 
-const TABS_CONFIG = [
-  { id: BOARD_TABS.AVAILABLE, label: "Available" },
-  { id: BOARD_TABS.ACTIVE, label: "Active" },
-  { id: BOARD_TABS.LEADERBOARD, label: "Leaderboard" },
-];
+// Wrapper functions to inject dependencies into the extracted UI modules
+// These maintain the same external API while delegating to extracted code
 
 /**
- * Adds the tab navigation buttons at the top of the form.
- * Returns the mapping of indices to actions for these buttons.
+ * Main Quest Board display - wrapper for extracted UI module
  */
-function addTabButtons(form, currentTab, actionsList) {
-  for (const tab of TABS_CONFIG) {
-    const isCurrent = tab.id === currentTab;
-    const label = isCurrent ? `§l${tab.label}§r` : `${tab.label}`;
-
-    form.button(label, tab.icon);
-    actionsList.push({ type: "nav", tab: tab.id });
-  }
-}
-
-async function showAvailableTab(player, actions, isStandalone = false) {
-  const data = ensureQuestData(player);
-
-  // Count non-null quests
-  const availableQuests = data.available.filter(q => q !== null);
-  const activeCount = data.active ? 1 : 0;
-
-  // Calculate refresh button text
-  let refreshLabel;
-  if (data.freeRerollAvailable) {
-    refreshLabel = "§a⟳ Refresh Quests (FREE)§r";
-  } else {
-    const price = calculateRerollPrice(data.paidRerollsThisCycle);
-    refreshLabel = `§e⟳ Refresh Quests (${price} SP)§r`;
-  }
-
-  // Time until free refresh
-  const msUntilRefresh = (data.lastRefreshTime + TWENTY_FOUR_HOURS_MS) - Date.now();
-  const hoursLeft = Math.max(0, Math.floor(msUntilRefresh / (1000 * 60 * 60)));
-  const minsLeft = Math.max(0, Math.floor((msUntilRefresh % (1000 * 60 * 60)) / (1000 * 60)));
-  const timerText = msUntilRefresh > 0 ? `§7Auto-refresh in: ${hoursLeft}h ${minsLeft}m§r` : "";
-
-  const header = isStandalone ? "" : "§2§l[ AVAILABLE ]§r\n\n";
-  const body = [
-    `${header}§7Active: ${activeCount}/1§r`,
-    timerText,
-    "",
-    availableQuests.length ? "§fNew Requests:§r" : "§7All quests accepted. Complete them or refresh!§r",
-  ].filter(Boolean).join("\n");
-
-  const title = isStandalone ? "§lAvailable Quests§r" : "§lQuest Board§r";
-
-  const form = new ActionFormData()
-    .title(title)
-    .body(body);
-
-  // 1. Tabs
-  if (!isStandalone) {
-    addTabButtons(form, BOARD_TABS.AVAILABLE, actions);
-  }
-
-  // 2. Quest buttons (mythic/legendary/rare show rarity badge, common shows category icon)
-  data.available.forEach((quest, index) => {
-    if (quest) {
-      const showRarityBadge = quest.rarity === "mythic" || quest.rarity === "legendary" || quest.rarity === "rare";
-      const icon = getQuestIcon(quest, showRarityBadge);
-      const colors = getQuestColors(quest.rarity);
-      form.button(`${colors.button}${quest.title}§r`, icon);
-      actions.push({ type: "view_details", questIndex: index, fromStandalone: isStandalone });
-    }
-  });
-
-  // 3. Refresh button — swaps between refresh arrows (free) and SP coin (paid)
-  const refreshIcon = data.freeRerollAvailable ? TEXTURES.REFRESH : TEXTURES.SP_COIN;
-  form.button(refreshLabel, refreshIcon);
-  actions.push({ type: "refresh", fromStandalone: isStandalone });
-
-  // 4. Close option (always good UX)
-  form.button("Close");
-  actions.push({ type: "close" });
-
-  return form;
-}
-
-async function showActiveTab(player, actions, isStandalone = false) {
-  const data = ensureQuestData(player);
-
-  const header = isStandalone ? "" : "§2§l[ ACTIVE ]§r\n\n";
-  const body = data.active
-    ? `${header}§7Your Current Quest:§r`
-    : `${header}§7No active quest. Pick one from Available!§r`;
-
-  const title = isStandalone ? "§lActive Quest§r" : "§lQuest Board§r";
-
-  const form = new ActionFormData()
-    .title(title)
-    .body(body);
-
-  // 1. Tabs
-  if (!isStandalone) {
-    addTabButtons(form, BOARD_TABS.ACTIVE, actions);
-  }
-
-  // 2. Content
-  if (data.active) {
-    const quest = data.active;
-    const icon = getQuestIcon(quest);
-    const colors = getQuestColors(quest.rarity);
-
-    // Check completion
-    const isComplete = (quest.type === "gather")
-      ? true // Gather quests validate on turn-in
-      : data.progress >= quest.requiredCount;
-
-    // For mining/kill, we use data.progress. Gather is checked on turn-in.
-
-    if (isComplete) {
-      form.button(`§aTurn In: ${quest.title}§r`, TEXTURES.COMPLETE);
-      actions.push({ type: "turnIn", fromStandalone: isStandalone });
-    } else {
-      const progressStr = `${data.progress}/${quest.requiredCount}`;
-      form.button(`${colors.button}${quest.title}\n§8${progressStr}§r`, icon);
-      actions.push({ type: "manage", fromStandalone: isStandalone });
-    }
-  }
-
-  form.button("Close");
-  actions.push({ type: "close" });
-
-  return form;
-}
-
-async function showLeaderboardTab(player, actions, isStandalone = false) {
-  const { entries, currentPlayer, missingObjective } = getLeaderboardEntries(player);
-
-  const header = isStandalone ? "" : "§2§l[ LEADERBOARD ]§r\n\n";
-  let bodyText = missingObjective
-    ? "§cLeaderboard unavailable.§r"
-    : `${header}§7Top Survivors:§r\n`;
-
-  if (!missingObjective) {
-    if (entries.length === 0) {
-      bodyText += "§7No records yet.§r";
-    } else {
-      entries.forEach((entry, i) => {
-        bodyText += `\n${i + 1}. §e${entry.name}§r : ${entry.score}`;
-      });
-      if (currentPlayer) {
-        bodyText += `\n\n§lYou: ${currentPlayer.score}§r`;
-      }
-    }
-  }
-
-  const title = isStandalone ? "§lLeaderboard§r" : "§lQuest Board§r";
-
-  const form = new ActionFormData()
-    .title(title)
-    .body(bodyText);
-
-  // 1. Tabs
-  if (!isStandalone) {
-    addTabButtons(form, BOARD_TABS.LEADERBOARD, actions);
-  }
-
-  // 2. Content (Leaderboard is mostly read-only, maybe a Refresh button?)
-  form.button("Refresh");
-  actions.push({ type: "nav", tab: BOARD_TABS.LEADERBOARD, fromStandalone: isStandalone });
-
-  form.button("Close");
-  actions.push({ type: "close" });
-
-  return form;
-}
-
 async function showQuestBoard(player, forcedTab = null, isStandalone = false, playOpenSound = true) {
-  // ensureQuestData handles expiry now, called inside tab functions too, but calling here helps consistency
-  const data = ensureQuestData(player);
-
-  const tab = forcedTab || getPlayerTab(player);
-  if (!isStandalone) {
-    setPlayerTab(player, tab); // Ensure state is synced only if navigating
-  }
-
-  // Play menu open sounds based on which tab is opening (initial open only)
-  if (playOpenSound) {
-    if (tab === BOARD_TABS.AVAILABLE) {
-      player.playSound("ui.available_open", { volume: 0.8, pitch: 1.0 });
-    } else if (tab === BOARD_TABS.ACTIVE) {
-      player.playSound("ui.active_open", { volume: 0.8, pitch: 1.0 });
-    } else if (tab === BOARD_TABS.LEADERBOARD) {
-      player.playSound("ui.legends_open", { volume: 0.8, pitch: 1.0 });
-
-      // Check if this player is ranked #1 on the leaderboard
-      const { entries } = getLeaderboardEntries(player);
-      const isFirstPlace = entries.length > 0 && entries[0].name === player.name;
-
-      if (isFirstPlace) {
-        // Wait 2 seconds (40 ticks) then play special sound for all nearby players
-        system.runTimeout(() => {
-          const nearbyPlayers = player.dimension.getPlayers({
-            location: player.location,
-            maxDistance: 15
-          });
-
-          for (const nearby of nearbyPlayers) {
-            nearby.playSound("ui.legends_first_place", {
-              location: player.location,  // Sound emanates from the #1 player
-              volume: 1.0,
-              pitch: 1.0
-            });
-          }
-        }, 40);  // 40 ticks = 2 seconds
-      }
-    }
-  }
-
-  let form;
-  const actions = []; // List of actions corresponding to buttons by index
-
-  switch (tab) {
-    case BOARD_TABS.AVAILABLE:
-      form = await showAvailableTab(player, actions, isStandalone);
-      break;
-    case BOARD_TABS.ACTIVE:
-      form = await showActiveTab(player, actions, isStandalone);
-      break;
-    case BOARD_TABS.LEADERBOARD:
-      form = await showLeaderboardTab(player, actions, isStandalone);
-      break;
-    default:
-      form = await showAvailableTab(player, actions, isStandalone);
-      break;
-  }
-
-  const res = await form.show(player);
-  if (res.canceled) return;
-
-  const action = actions[res.selection];
-  if (!action) return;
-
-  handleUiAction(player, action);
+  const deps = {
+    TEXTURES,
+    TWENTY_FOUR_HOURS_MS,
+    ensureQuestData,
+    calculateRerollPrice,
+    getQuestIcon: getQuestIconWrapper,
+    getQuestColors: getQuestColorsWrapper,
+    showLeaderboardTab,
+    getLeaderboardEntries,
+    handleQuestAbandon
+  };
+  
+  await showQuestBoardUI(player, forcedTab, isStandalone, playOpenSound, deps, handleUiAction);
 }
 
+/**
+ * UI action handler - wrapper for extracted actions module
+ */
 async function handleUiAction(player, action) {
-  if (action.type === "close") return;
-
-  const isStandalone = action.fromStandalone ?? false;
-
-  if (action.type === "nav") {
-    await showQuestBoard(player, action.tab, isStandalone, false);
-    return;
-  }
-
-  if (action.type === "refresh") {
-    const success = handleRefresh(player);
-    await showQuestBoard(player, BOARD_TABS.AVAILABLE, isStandalone, false);
-    return;
-  }
-
-  if (action.type === "view_details") {
-    // Show details (needs index now)
-    await showQuestDetails(player, action.questIndex, isStandalone);
-    return;
-  }
-
-  if (action.type === "accept") {
-    const result = handleQuestAccept(player, action.questIndex);
-    if (!result.ok) {
-      player.sendMessage(result.reason);
-    } else {
-      const def = result.quest;
-      const colors = getQuestColors(def.rarity);
-      player.sendMessage(`§aAccepted: ${colors.chat}${def.title}§r`);
-
-      // FX: Rarity
-      if (def.rarity === "legendary") {
-        player.playSound("quest.accept_legendary", { volume: 1.0, pitch: 1.0 });
-        player.dimension.spawnParticle("minecraft:totem_particle", player.location);
-        player.sendMessage("§6§l[LEGENDARY CONTRACT ACCEPTED]§r");
-      } else if (def.rarity === "rare") {
-        player.playSound("quest.accept_rare", { volume: 1.0, pitch: 1.0 });
-        player.dimension.spawnParticle("minecraft:villager_happy", player.location);
-      } else {
-        player.playSound("random.orb", { pitch: 1.0 });
-      }
-    }
-    return;
-  }
-
-  if (action.type === "turnIn") {
-    handleQuestTurnIn(player);
-    return;
-  }
-
-  if (action.type === "manage") {
-    // Show management for active quest (Abandon)
-    await showManageQuest(player, isStandalone);
-    return;
-  }
-}
-
-async function showQuestDetails(player, questIndex, isStandalone = false) {
-  const data = ensureQuestData(player);
-  const def = data.available[questIndex];
-  if (!def) return;
-
-  // Formatting strings
-  const scoreRaw = def.reward?.scoreboardIncrement || 0;
-  const itemsRaw = def.reward?.rewardItems || [];
-
-  let rewardsStr = "";
-  if (scoreRaw > 0) rewardsStr += `\n§e+${scoreRaw} Super Points§r`;
-  for (const item of itemsRaw) {
-    // Attempt to pretty print item name
-    const name = item.typeId.replace("minecraft:", "").replace(/_/g, " ");
-    rewardsStr += `\n§b+${item.amount} ${name}§r`;
-  }
-  if (!rewardsStr) rewardsStr = "\n§7None§r";
-
-  // Rarity Display
-  let rarityText = "§7Tier: COMMON§r";
-  if (def.rarity === "rare") rarityText = "§bTier: RARE§r";
-  if (def.rarity === "legendary") rarityText = "§6§lTier: LEGENDARY§r";
-  if (def.rarity === "mythic") rarityText = "§d§lTier: MYTHIC§r";
-
-  let warningText = "";
-  if (def.rarity === "legendary") {
-    warningText = "\n\n§c⚠ HIGH VALUE TARGET ⚠§r";
-  }
-  if (def.rarity === "mythic") {
-    warningText = "\n\n§d§l⚠ ULTRA RARE MYTHIC ⚠§r";
-  }
-
-  const colors = getQuestColors(def.rarity);
-
-  const form = new MessageFormData()
-    .title("Quest Contract")
-    .body(
-      `${colors.chat}${def.title}§r` +
-      `\n\n${rarityText}${warningText}` +
-      `\n\n§7Difficulty: Normal§r` +
-      `\n\n§o"${def.description || "No description provided."}"§r` +
-      `\n\n§cOBJECTIVES:§r` +
-      `\n- ${def.title}` +
-      `\n\n§eREWARDS:§r` +
-      rewardsStr
-    )
-    .button1("§lACCEPT CONTRACT§r")
-    .button2("Decline");
-
-  const res = await form.show(player);
-
-  if (res.selection === 0) {
-    // Accept (Button 1 -> Index 0)
-    await handleUiAction(player, { type: "accept", questIndex, fromStandalone: isStandalone });
-    return;
-  }
-
-  // Decline or Cancel
-  if (res.canceled || res.selection === 1) {
-    await showQuestBoard(player, BOARD_TABS.AVAILABLE, isStandalone, false);
-  }
-}
-
-async function showManageQuest(player, isStandalone = false) {
-  const data = ensureQuestData(player);
-  if (!data.active) {
-    await showQuestBoard(player, BOARD_TABS.ACTIVE, isStandalone, false);
-    return;
-  }
-
-  const quest = data.active;
-  const colors = getQuestColors(quest.rarity);
-
-  const form = new MessageFormData()
-    .title("§cAbandon Quest?")
-    .body(`Are you sure you want to abandon:\n${colors.chat}${quest.title}§r\n\nProgress will be lost and it will return to available quests.`)
-    .button1("Yes, Abandon")
-    .button2("No, Keep");
-
-  const res = await form.show(player);
-  // Button 1 ("Yes") -> 0
-  // Button 2 ("No") -> 1
-
-  if (res.canceled || res.selection === 1) {
-    // Button 2 (No) -> 1, or Canceled
-    await showQuestBoard(player, BOARD_TABS.ACTIVE, isStandalone, false);
-    return;
-  }
-
-  if (res.selection === 0) {
-    const removed = handleQuestAbandon(player);
-    if (removed) {
-      const c = getQuestColors(removed.rarity);
-      player.sendMessage(`§eAbandoned: ${c.chat}${removed.title}§r`);
-    }
-    await showQuestBoard(player, BOARD_TABS.ACTIVE, isStandalone, false);
-  }
+  const deps = {
+    getQuestColors: getQuestColorsWrapper,
+    handleRefresh,
+    handleQuestAccept,
+    ensureQuestData,
+    handleQuestAbandon
+  };
+  
+  await handleUiActionBase(player, action, deps, showQuestBoard, 
+    (player, questIndex, isStandalone) => showQuestDetails(player, questIndex, isStandalone, deps, showQuestBoard, handleUiAction),
+    (player, isStandalone) => showManageQuest(player, isStandalone, deps, showQuestBoard)
+  );
 }
 
 /** -----------------------------
  *  Leaderboard Logic
  *  ----------------------------- */
-
-function getLeaderboardEntries(player) {
-  const objective = world.scoreboard.getObjective(SCOREBOARD_OBJECTIVE_ID);
-  if (!objective) {
-    return { entries: [], currentPlayer: null, missingObjective: true };
-  }
-
-  const participants = objective.getParticipants();
-  const scored = [];
-
-  for (const participant of participants) {
-    const score = objective.getScore(participant);
-    if (typeof score !== "number") continue;
-
-    // Try to get name from registry first (works for offline players)
-    // Fall back to displayName/name for online players or unknown entries
-    let name = lookupPlayerName(participant.id);
-    if (!name) {
-      // Check if displayName looks like the offline placeholder
-      const displayName = participant.displayName || participant.name || "Unknown";
-      if (displayName.includes("offlinePlayerName") || displayName.includes("commands.scoreboard")) {
-        name = "Unknown Player"; // Fallback if not in registry
-      } else {
-        name = displayName;
-      }
-    }
-
-    scored.push({
-      name,
-      score,
-      participant,
-    });
-  }
-
-  scored.sort((a, b) => b.score - a.score);
-  const topEntries = scored.slice(0, LEADERBOARD_ENTRY_LIMIT);
-
-  let currentPlayerEntry = null;
-  if (player) {
-    // Try to find exact match
-    currentPlayerEntry = scored.find(e => e.name === player.name) ||
-      scored.find(e => e.participant.id === player.id);
-  }
-
-  return { entries: topEntries, currentPlayer: currentPlayerEntry, missingObjective: false };
-}
 
 /** -----------------------------
  *  Kill/Event Logic
@@ -1515,51 +882,259 @@ function triggerQuestClearCelebration(player, spEarned) {
   player.sendMessage("§6═══════════════════════════════════════");
 }
 
+/**
+ * Updates quest HUD - wrapper for extracted HUD module
+ */
 function updateQuestHud(player, questState) {
-  if (questState.status === "active") {
-    // Gather HUD is handled in loop, Kill/Mine here
-    // Logic same: show progress
-  }
+  return updateQuestHudBase(player, questState);
+}
 
-  if (questState.status === "complete") {
-    player.onScreenDisplay?.setActionBar?.("§aQuest complete! Return to board.§r");
+/**
+ * Handles instant quest completion with immediate rewards.
+ * This replaces the old turn-in system - rewards are now given immediately when quest objectives are completed.
+ * @param {Player} player - The player who completed the quest
+ * @param {Object} questState - The quest that was completed
+ */
+function markQuestComplete(player, questState) {
+  const data = ensureQuestData(player);
+  if (!data.active || data.active.id !== questState.id) {
+    console.warn(`[markQuestComplete] Quest mismatch or no active quest for player ${player.name}`);
     return;
   }
 
-  // If we are passing in a temporary state object, we trust it has progress/goal
-  if (questState.type === "kill" || questState.type === "mine" || questState.type === "gather") {
-    if (questState.goal <= 0) return;
+  const quest = data.active;
+  
+  // === GATHER QUEST ITEM CONSUMPTION ===
+  // For gather quests, we need to consume the required items from inventory
+  if (quest.type === "gather" && quest.targetItemIds) {
+    const inventory = player.getComponent("inventory")?.container;
+    if (!inventory) {
+      console.warn(`[markQuestComplete] No inventory found for gather quest completion`);
+      return;
+    }
 
-    // Rarity-based text color
-    let textColor = "§7"; // Common: gray
-    if (questState.rarity === "legendary") textColor = "§6"; // Legendary: gold
-    else if (questState.rarity === "rare") textColor = "§b"; // Rare: aqua
+    // Count available items
+    let totalCount = 0;
+    for (let i = 0; i < inventory.size; i++) {
+      const item = inventory.getItem(i);
+      if (item && quest.targetItemIds.includes(item.typeId)) {
+        totalCount += item.amount;
+      }
+    }
 
-    // Clean text display (icons removed due to action bar height clipping)
-    player.onScreenDisplay?.setActionBar?.(`${textColor}${questState.title}: ${questState.progress}/${questState.goal}§r`);
+    if (totalCount < quest.requiredCount) {
+      // This shouldn't happen if called correctly, but safety check
+      console.warn(`[markQuestComplete] Insufficient items for gather quest: ${totalCount}/${quest.requiredCount}`);
+      return;
+    }
+
+    // Consume the required items
+    let remainingToRemove = quest.requiredCount;
+    for (let i = 0; i < inventory.size; i++) {
+      if (remainingToRemove <= 0) break;
+      const item = inventory.getItem(i);
+      if (item && quest.targetItemIds.includes(item.typeId)) {
+        if (item.amount <= remainingToRemove) {
+          remainingToRemove -= item.amount;
+          inventory.setItem(i, undefined);
+        } else {
+          item.amount -= remainingToRemove;
+          remainingToRemove = 0;
+          inventory.setItem(i, item);
+        }
+      }
+    }
+    
+    // Notify player about item consumption
+    const itemNames = quest.targetItemIds.map(id => id.replace("minecraft:", "").replace(/_/g, " ")).join(", ");
+    player.sendMessage(`§7Consumed: ${quest.requiredCount}x ${itemNames}§r`);
   }
-}
 
-// NOTE: markQuestComplete helper is less useful now as logic is split, but let's keep it for event handlers
-function markQuestComplete(player, questState) {
-  // Just playing sound/particle, turn-in logic does the real completion
-  // But wait, for Kill/Mine we need to know they are "Ready to Turn In".
-  // In new system: "Complete" means "Ready to Turn In" (status check in UI).
-  // But we don't have a status field on the object in DB anymore (it's flattened).
-  // So "Complete" is derived from progress >= goal.
+  // === ENCOUNTER CLEANUP ===
+  // Despawn remaining encounter mobs if this is an encounter quest
+  if (quest.isEncounter && quest.spawnData) {
+    try {
+      const dimension = world.getDimension(quest.spawnData.dimensionId || "overworld");
+      const despawnedCount = despawnEncounterMobs(quest.id, dimension);
+      if (despawnedCount > 0) {
+        console.log(`[markQuestComplete] Despawned ${despawnedCount} remaining mobs for quest ${quest.id}`);
+      }
+    } catch (error) {
+      console.error(`[markQuestComplete] Error despawning encounter mobs: ${error}`);
+    }
+  }
 
-  // This function is called when progress hits goal in events.
-  player.onScreenDisplay?.setActionBar?.("§aQuest complete! Return to board.§r");
+  // === REWARD CALCULATION AND DISTRIBUTION ===
+  const reward = quest.reward;
+  const questBaseSP = reward?.scoreboardIncrement ?? 0;
+  const isFirstOfDay = !hasCompletedQuestToday(player);
 
-  const colors = getQuestColors(questState.rarity);
-  player.sendMessage(`§aQuest Complete: ${colors.chat}${questState.title}§r`);
-  player.playSound("random.levelup");
-  player.dimension.spawnParticle("minecraft:villager_happy", player.location);
+  const rewardResult = calculateCompletionReward(
+    questBaseSP,
+    quest.rarity,
+    player,
+    isFirstOfDay
+  );
+
+  // Award SP
+  if (rewardResult.finalAmount > 0) {
+    addSP(player, rewardResult.finalAmount, { skipCelebration: true });
+    
+    // Trigger celebration with small delay to ensure SP display updates first
+    system.runTimeout(() => {
+      celebrateQuestComplete(player, {
+        rarity: quest.rarity,
+        spAmount: rewardResult.finalAmount,
+        isJackpot: rewardResult.isJackpot || false,
+        streakLabel: rewardResult.streakLabel || null
+      });
+    }, 3);
+  }
+
+  // Increment streak
+  incrementStreak(player);
+
+  // Mark daily completion
+  markDailyCompletion(player);
+
+  // Display reward message
+  player.sendMessage(rewardResult.message);
+
+  // Play jackpot sound if triggered
+  if (rewardResult.isJackpot) {
+    player.playSound("random.levelup", { volume: 1.0, pitch: 1.2 });
+  }
+
+  // Award item rewards
+  if (reward && reward.rewardItems) {
+    const inventory = player.getComponent("inventory")?.container;
+    if (inventory) {
+      for (const rItem of reward.rewardItems) {
+        try {
+          const itemStack = new ItemStack(rItem.typeId, rItem.amount);
+          inventory.addItem(itemStack);
+          player.sendMessage(`§aReceived: ${rItem.amount}x ${rItem.typeId.replace("minecraft:", "")}§r`);
+        } catch (e) {
+          // Inventory full — drop at feet
+          player.dimension.spawnItem(new ItemStack(rItem.typeId, rItem.amount), player.location);
+          player.sendMessage(`§eInventory full! Dropped: ${rItem.amount}x ${rItem.typeId.replace("minecraft:", "")}§r`);
+        }
+      }
+    }
+  }
+
+  // Update stats
+  data.lifetimeCompleted += 1;
+
+  // Clear active quest
+  data.active = null;
+  data.progress = 0;
+
+  // === CHECK FOR ALL QUESTS COMPLETE ===
+  const allComplete = data.available.every(slot => slot === null);
+
+  if (allComplete) {
+    // All 3 quests completed! Auto-generate new quests and trigger celebration
+    data.available = QuestGenerator.generateDailyQuests(3);
+    data.lastRefreshTime = Date.now();
+    data.freeRerollAvailable = true;
+    data.paidRerollsThisCycle = 0;
+
+    PersistenceManager.saveQuestData(player, data);
+
+    // Trigger all-quests-complete celebration
+    triggerQuestClearCelebration(player, rewardResult.finalAmount);
+    player.sendMessage("§6§l★ ALL QUESTS COMPLETE! ★§r");
+    player.sendMessage("§eFresh quests have been generated. Check the Quest Board!§r");
+  } else {
+    // Normal completion
+    PersistenceManager.saveQuestData(player, data);
+
+    const colors = getQuestColorsWrapper(quest.rarity);
+    player.sendMessage(`§a✓ Quest Complete: ${colors.chat}${quest.title}§r`);
+    player.playSound("quest.complete_single", { volume: 1.0, pitch: 1.0 });
+    player.dimension.spawnParticle("minecraft:villager_happy", player.location);
+  }
+
+  // Clear HUD
+  player.onScreenDisplay?.setActionBar?.("");
 }
 
 function handleEntityDeath(ev) {
   const { damageSource, deadEntity } = ev;
   if (!deadEntity) return;
+
+  // ========================================================================
+  // PHASE 2: ENCOUNTER SYSTEM - Kill Tracking via Tags
+  // ========================================================================
+  // Check if this is an encounter mob FIRST, before standard kill quest logic.
+  // Encounter mobs use tag-based tracking instead of entity type matching.
+  //
+  // KILL ATTRIBUTION MODEL (Phase 2):
+  // - ANY death of an encounter mob counts (player kill, environmental, etc.)
+  // - No need to check who killed it - just increment quest progress
+  // - Find quest owner by iterating all players (acceptable for small server)
+  //
+  // WORKFLOW:
+  // 1. Check if dead entity has encounter mob tag
+  // 2. Extract quest ID from entity tags
+  // 3. Find player who owns that quest
+  // 4. Increment their progress
+  // 5. Notify player and check for completion
+  // 6. Return early to skip standard kill quest logic
+  //
+  // IMPORTANT: This block runs BEFORE the killer check, so environmental
+  // kills (lava, fall damage) are properly attributed to the quest owner.
+  // ========================================================================
+  if (isEncounterMob(deadEntity)) {
+    const questId = getQuestIdFromMob(deadEntity);
+
+    if (questId) {
+      // Find which player owns this quest
+      // For small servers (3 players), iterating is acceptable
+      // For larger servers, consider a lookup table: questId -> playerId
+      for (const player of world.getPlayers()) {
+        const questData = ensureQuestData(player);
+
+        // Check if this player owns the encounter quest
+        if (questData.active &&
+            questData.active.isEncounter &&
+            questData.active.id === questId) {
+
+          // Increment progress
+          questData.progress++;
+
+          // Calculate remaining mobs
+          const remaining = questData.active.totalMobCount - questData.progress;
+
+          // Notify player of progress
+          if (remaining > 0) {
+            player.sendMessage(`§a${questData.active.encounterName}: §f${questData.progress}/${questData.active.totalMobCount} §7(${remaining} remaining)`);
+            player.playSound("quest.progress_tick", { volume: 0.6, pitch: 1.0 });
+          } else {
+            // All mobs killed - quest complete!
+            questData.active.encounterState = "complete";  // Phase 3: State transition
+            player.sendMessage(`§a${questData.active.encounterName}: §6COMPLETE!`);
+            player.playSound("random.levelup");
+            markQuestComplete(player, questData.active);
+          }
+
+          // HUD updates for encounter quests are handled by EncounterProximity
+          // No need to call updateQuestHud here
+
+          // Save progress
+          PersistenceManager.saveQuestData(player, questData);
+
+          // Only one player can own this quest - stop searching
+          break;
+        }
+      }
+    }
+
+    // Encounter mob handled - skip standard kill quest logic
+    return;
+  }
+  // === END ENCOUNTER KILL TRACKING ===
 
   const fullId = deadEntity.typeId;
   const simpleId = fullId.replace("minecraft:", "");
@@ -1658,273 +1233,32 @@ function wireEntityHitTracking() {
   });
 }
 
-function handleQuestTurnIn(player) {
-  const data = ensureQuestData(player);
-
-  if (!data.active) {
-    player.sendMessage("§cNo active quest to turn in.§r");
-    return;
-  }
-
-  const quest = data.active;
-
-  // === VALIDATE COMPLETION ===
-
-  if (quest.type === "gather" && quest.targetItemIds) {
-    const inventory = player.getComponent("inventory")?.container;
-    if (!inventory) return;
-
-    // Count items
-    let totalCount = 0;
-    for (let i = 0; i < inventory.size; i++) {
-      const item = inventory.getItem(i);
-      if (item && quest.targetItemIds.includes(item.typeId)) {
-        totalCount += item.amount;
-      }
-    }
-
-    if (totalCount < quest.requiredCount) {
-      player.sendMessage(`§cNeed ${quest.requiredCount - totalCount} more items!§r`);
-      return;
-    }
-
-    // Consume items
-    let remainingToRemove = quest.requiredCount;
-    for (let i = 0; i < inventory.size; i++) {
-      if (remainingToRemove <= 0) break;
-      const item = inventory.getItem(i);
-      if (item && quest.targetItemIds.includes(item.typeId)) {
-        if (item.amount <= remainingToRemove) {
-          remainingToRemove -= item.amount;
-          inventory.setItem(i, undefined);
-        } else {
-          item.amount -= remainingToRemove;
-          remainingToRemove = 0;
-          inventory.setItem(i, item);
-        }
-      }
-    }
-  } else if (quest.type === "kill" || quest.type === "mine") {
-    if (data.progress < quest.requiredCount) {
-      player.sendMessage(`§cProgress: ${data.progress}/${quest.requiredCount}§r`);
-      return;
-    }
-  }
-
-  // === SUCCESSFUL TURN-IN ===
-
-  // Calculate final reward with all bonuses
-  const reward = quest.reward;
-  const questBaseSP = reward?.scoreboardIncrement ?? 0;
-  const isFirstOfDay = !hasCompletedQuestToday(player);
-
-  const rewardResult = calculateCompletionReward(
-    questBaseSP,
-    quest.rarity,
-    player,
-    isFirstOfDay
-  );
-
-  // Award SP using new economy system
-  if (rewardResult.finalAmount > 0) {
-    addSP(player, rewardResult.finalAmount);
-  }
-
-  // Increment streak
-  incrementStreak(player);
-
-  // Mark daily completion
-  markDailyCompletion(player);
-
-  // Display reward message (includes jackpot, streaks, daily bonus)
-  player.sendMessage(rewardResult.message);
-
-  // Play jackpot sound if triggered
-  if (rewardResult.isJackpot) {
-    player.playSound("random.levelup", { volume: 1.0, pitch: 1.2 });
-  }
-
-  // Items (unchanged)
-  if (reward && reward.rewardItems) {
-    const inventory = player.getComponent("inventory")?.container;
-    if (inventory) {
-      for (const rItem of reward.rewardItems) {
-        try {
-          const itemStack = new ItemStack(rItem.typeId, rItem.amount);
-          inventory.addItem(itemStack);
-          player.sendMessage(`§aReceived: ${rItem.amount}x ${rItem.typeId.replace("minecraft:", "")}§r`);
-        } catch (e) {
-          // Inventory full — drop at feet
-          player.dimension.spawnItem(new ItemStack(rItem.typeId, rItem.amount), player.location);
-          player.sendMessage(`§eInventory full! Dropped: ${rItem.amount}x ${rItem.typeId.replace("minecraft:", "")}§r`);
-        }
-      }
-    }
-  }
-
-  // Update stats
-  data.lifetimeCompleted += 1;
-
-  // Clear active quest
-  data.active = null;
-  data.progress = 0;
-
-  // === CHECK FOR FULL CLEAR ===
-  const allComplete = data.available.every(slot => slot === null);
-
-  if (allComplete) {
-    // JACKPOT! Auto-populate new quests
-    data.available = QuestGenerator.generateDailyQuests(3);
-    data.lastRefreshTime = Date.now();
-    data.freeRerollAvailable = true;
-    data.paidRerollsThisCycle = 0;
-
-    PersistenceManager.saveQuestData(player, data);
-
-    // CELEBRATION!
-    triggerQuestClearCelebration(player, rewardResult.finalAmount);
-  } else {
-    // Normal turn-in
-    PersistenceManager.saveQuestData(player, data);
-
-    const colors = getQuestColors(quest.rarity);
-    player.sendMessage(`§a✓ Quest Complete: ${colors.chat}${quest.title}`);
-    player.playSound("quest.complete_single", { volume: 1.0, pitch: 1.0 });
-    player.dimension.spawnParticle("minecraft:villager_happy", player.location);
-  }
-
-  // Clear HUD
-  player.onScreenDisplay?.setActionBar?.("");
-}
-
-/** -----------------------------
- *  Atlas NPC
- *  ----------------------------- */
-
 /**
- * Shows the Atlas NPC dialog with tutorial/explanation content
- * @param {import("@minecraft/server").Player} player
+ * Shows the Atlas NPC dialog - wrapper
  */
 function showQuestMasterDialog(player) {
-  const form = new ActionFormData()
-    .title("§5§lAtlas")
-    .body(
-      "§7Greetings, adventurer! I am the keeper of the Quest Board, Atlas.\n\n" +
-      "§fSelect a topic to learn more:"
-    )
-    .button("§2How Quests Work", TEXTURES.DEFAULT)
-    .button("§eAbout Super Points (SP)", TEXTURES.SP_COIN)
-    .button("§bRerolls & Refreshes", TEXTURES.REFRESH)
-    .button("§dQuest Rarities", TEXTURES.MYTHIC)
-    .button("§aOpen Quest Board", TEXTURES.CATEGORY_UNDEAD)
-    .button("§7Nevermind");
-
-  form.show(player).then((response) => {
-    if (response.canceled || response.selection === 5) return;
-
-    switch (response.selection) {
-      case 0:
-        showTutorialPage(player, "how_quests_work");
-        break;
-      case 1:
-        showTutorialPage(player, "super_points");
-        break;
-      case 2:
-        showTutorialPage(player, "rerolls");
-        break;
-      case 3:
-        showTutorialPage(player, "rarities");
-        break;
-      case 4:
-        // Open the actual quest board
-        showQuestBoard(player, BOARD_TABS.AVAILABLE, true);
-        break;
-    }
-  });
+  const deps = {
+    TEXTURES,
+    showQuestBoard
+  };
+  return showQuestMasterDialogBase(player, deps, showTutorialPage);
 }
 
 /**
- * Shows a specific tutorial page as a MessageForm (OK to go back)
- * @param {import("@minecraft/server").Player} player
- * @param {string} topic
+ * Shows a tutorial page - wrapper
  */
 function showTutorialPage(player, topic) {
-  const tutorials = {
-    how_quests_work: {
-      title: "§2How Quests Work",
-      body:
-        "§fThe Quest Board offers you §e3 personal quests§f that refresh every §b24 hours§f.\n\n" +
-        "§7• §fYou can have §eONE active quest§f at a time\n" +
-        "§7• §fComplete it by meeting the goal (kill mobs, mine blocks, or gather items)\n" +
-        "§7• §fReturn to the board to §aturn in§f your completed quest\n" +
-        "§7• §fCompleting all 3 quests triggers a §dbonus refresh§f!\n\n" +
-        "§8Tip: Sneak + interact with the board to place blocks nearby."
-    },
-    super_points: {
-      title: "§eSuper Points (SP)",
-      body:
-        "§6SP§f is the currency of the Quest Board.\n\n" +
-        "§7• §fEarn SP by completing quests\n" +
-        "§7• §fHigher rarity quests (§brare§f, §6legendary§f, §dmythic§f) give more SP\n" +
-        "§7• §fSP is tracked on the §dLeaderboard§f tab\n" +
-        "§7• §fSpend SP on §cpaid rerolls§f when your free one is used\n\n" +
-        "§8Future: SP will unlock rewards, cosmetics, and more!"
-    },
-    rerolls: {
-      title: "§bRerolls & Refreshes",
-      body:
-        "§fDon't like your available quests? You have options:\n\n" +
-        "§a§lFree Reroll§r\n" +
-        "§7You get §eONE free reroll§7 per 24-hour cycle. Use it wisely!\n\n" +
-        "§c§lPaid Rerolls§r\n" +
-        "§7After your free reroll, you can spend §6SP§7 for more:\n" +
-        "§7• 1st-2nd paid: §e100 SP§7 each → 3rd: §e200 SP§7 → 4th: §e400 SP§7...\n\n" +
-        "§d§l24-Hour Refresh§r\n" +
-        "§7Every 24 hours, your quests fully refresh and rerolls reset."
-    },
-    rarities: {
-      title: "§dQuest Rarities",
-      body:
-        "§fQuests come in four rarity tiers:\n\n" +
-        "§7§lCOMMON§r §f(70%) - Basic rewards\n" +
-        "§b§lRARE§r §f(22%) - 2x item rewards, higher SP\n" +
-        "§6§lLEGENDARY§r §f(7%) - 5x items, massive SP, marked with §6golden crown§f\n" +
-        "§d§lMYTHIC§r §f(1%) - 10x items, jackpot SP, marked with §dcrimson gem§f\n\n" +
-        "§7• §fHigher rarities = better rewards & SP multipliers\n" +
-        "§7• §fJackpot bonuses can trigger on any quest!\n" +
-        "§7• §fStreak bonuses stack with rarity for huge payouts\n\n" +
-        "§8If you see a mythic, don't reroll it!"
-    }
+  const deps = {
+    tutorials
   };
-
-  const page = tutorials[topic];
-  if (!page) return;
-
-  const msg = new MessageFormData()
-    .title(page.title)
-    .body(page.body)
-    .button1("§aBack to Atlas")
-    .button2("§7Close");
-
-  msg.show(player).then((response) => {
-    if (response.selection === 0) {
-      showQuestMasterDialog(player);
-    }
-  });
+  return showTutorialPageBase(player, topic, deps, showQuestMasterDialog);
 }
 
 /** -----------------------------
  *  Interaction & Wiring
  *  ----------------------------- */
 
-const BLOCK_TAB_MAP = {
-  // Available Column
-  "quest:avail_top": "available", "quest:avail_mid": "available", "quest:avail_bot": "available",
-  // Active Column
-  "quest:active_top": "active", "quest:active_mid": "active", "quest:active_bot": "active",
-  // Leaderboard Column
-  "quest:leader_top": "leaderboard", "quest:leader_mid": "leaderboard", "quest:leader_bot": "leaderboard"
-};
+// NOTE: BLOCK_MENU_MAP moved to features/questBoard/routing.js (Phase 3B)
 
 const lastInteractTime = new Map();
 const builderModePlayers = new Set();
@@ -1940,8 +1274,8 @@ function wireInteractions() {
     if (player.isSneaking) return false;
 
     // Check if it's our block FIRST
-    const tab = BLOCK_TAB_MAP[block.typeId];
-    if (!tab) return false;
+    const menuType = BLOCK_MENU_MAP[block.typeId];
+    if (!menuType) return false;
 
     // Debounce only for our blocks
     const now = Date.now();
@@ -1949,18 +1283,13 @@ function wireInteractions() {
     if (now - lastTime < 500) return true; // Blocked (ignored) but return true to say "handled/cancel"
     lastInteractTime.set(player.name, now);
 
-    // Save Board Location and Trigger Atmosphere
+    // Save Board Location
     if (!world.getDynamicProperty("superquester:board_location") || player.isSneaking) {
       world.setDynamicProperty("superquester:board_location", JSON.stringify(block.location));
     }
 
-    // Trigger the "Pitch Black" effect (Defer to next tick to avoid Restricted Execution error)
-    system.run(() => {
-      try {
-        AtmosphereManager.trigger(player);
-      } catch (e) { console.warn("Atmos error: " + e); }
-    });
-    system.run(() => showQuestBoard(player, tab, true)); // true = standalone
+    // Open quest board (Defer to next tick to avoid Restricted Execution error)
+    system.run(() => showQuestBoard(player, menuType, true)); // true = standalone
     return true;
   };
 
@@ -1982,59 +1311,301 @@ function wireInteractions() {
     });
   }
 
-  // Chat fallback
-  const chatEvent = world.beforeEvents?.chatSend;
-  if (chatEvent?.subscribe) {
-    chatEvent.subscribe((ev) => {
-      // Safe Zone Commands (!safezone on/off/status)
-      if (ev.message.startsWith("!safezone")) {
-        handleSafeZoneCommand(ev);
-        return;
-      }
+  registerChatCommands({
+    world,
+    system,
+    FALLBACK_COMMAND,
+    builderModePlayers,
+    showQuestBoard,
+    handleSafeZoneCommand,
+    handleBuilderCommand,
+    handleForceDailyCommand,
+    handleRegisterNamesCommand,
+    handleListUnknownLeaderboardCommand,
+    handleSetLeaderboardNameCommand,
+    handlePruneUnknownLeaderboardCommand,
+    ensureQuestData,
+    PersistenceManager,
+    registerPlayerName,
+    getUnknownLeaderboardEntries,
+    setPlayerNameRegistryEntry,
+    pruneUnknownZeroScoreEntries,
+    calculateDistance,
+    respawnRemainingMobs,
+    despawnEncounterMobs,
+    countRemainingMobs,
+    cleanupOrphanedMobs
+  });
+}
 
-      if (ev.message === "!builder") {
-        ev.cancel = true;
+// =============================================================================
+// EVENT HANDLER FUNCTIONS (PHASE 2)
+// =============================================================================
+// These functions are called by registerEvents.js
 
-        if (builderModePlayers.has(ev.sender.name)) {
-          builderModePlayers.delete(ev.sender.name);
-          system.run(() => ev.sender.sendMessage("§eBuilder Mode: OFF. Quest Board enabled.§r"));
-        } else {
-          builderModePlayers.add(ev.sender.name);
-          system.run(() => ev.sender.sendMessage("§aBuilder Mode: ON. Quest Board disabled (you can now build).§r"));
+/**
+ * World initialize handler - runs once when world loads
+ */
+function handleWorldInitialize() {
+  console.warn('Quest System BP loaded successfully');
+  world.setDefaultSpawnLocation(HUB_SPAWN_LOCATION);
+
+  // Initialize SP economy systems
+  initializeSPObjective();
+  initializeStreakTracking();
+
+  // Phase 3: Start encounter proximity monitoring
+  startProximityMonitoring(ensureQuestData);
+
+  // Initialize encounter mob protection (fire damage blocked for tagged mobs)
+  initializeEncounterMobProtection();
+
+  // Phase 5: Clean up orphaned encounter mobs from crashes
+  // IMPORTANT: Delay cleanup to give players time to join first
+  system.runTimeout(() => {
+    cleanupOrphanedMobs(ensureQuestData);
+  }, 100); // 5 second delay (100 ticks)
+
+  // Encounter persistence monitor (respawn missing mobs mid-mission)
+  startEncounterPersistenceMonitor();
+}
+
+/**
+ * Periodically ensure encounter mobs persist near the player
+ * If mobs despawn naturally or due to chunk issues, respawn missing count
+ */
+function startEncounterPersistenceMonitor() {
+  system.runInterval(() => {
+    for (const player of world.getPlayers()) {
+      const data = ensureQuestData(player);
+      const quest = data?.active;
+
+      if (!quest?.isEncounter) continue;
+      if (quest.encounterState !== "spawned") continue;
+      if (!quest.spawnData?.location) continue;
+
+      const progress = data.progress || 0;
+      const remainingExpected = quest.totalMobCount - progress;
+      if (remainingExpected <= 0) continue;
+
+      const dimensionId = quest.spawnData.dimensionId || player.dimension.id || "overworld";
+      if (player.dimension.id !== dimensionId) continue;
+
+      const distanceToSpawn = calculateDistance(player.location, quest.spawnData.location);
+      if (distanceToSpawn > ENCOUNTER_PERSISTENCE_MAX_DISTANCE) continue;
+
+      const dimension = player.dimension;
+      const alive = countRemainingMobs(quest.id, dimension);
+
+      if (alive < remainingExpected) {
+        const missing = remainingExpected - alive;
+        const respawnedIds = respawnMissingMobs(quest, missing, dimension);
+
+        if (respawnedIds.length > 0) {
+          quest.spawnData.spawnedEntityIds = [
+            ...(quest.spawnData.spawnedEntityIds || []),
+            ...respawnedIds
+          ];
+          PersistenceManager.saveQuestData(player, data);
+          console.log(`[EncounterPersistence] Respawned ${respawnedIds.length}/${missing} missing mobs for quest ${quest.id}`);
         }
-        return;
       }
+    }
+  }, ENCOUNTER_PERSISTENCE_CHECK_INTERVAL);
+}
 
-      if (ev.message === FALLBACK_COMMAND) {
-        ev.cancel = true;
-        system.run(() => showQuestBoard(ev.sender));
+/**
+ * Player spawn handler - runs when player joins or respawns
+ */
+function handlePlayerSpawn(ev) {
+  const { player, initialSpawn } = ev;
+
+  // Only force teleport to hub on INITIAL spawn (first time joining)
+  if (initialSpawn) {
+    system.runTimeout(() => {
+      try {
+        player.teleport(HUB_SPAWN_LOCATION, {
+          rotation: HUB_SPAWN_ROTATION,
+          checkForBlocks: true
+        });
+      } catch (e) {
+        console.warn(`[Spawn] Failed to teleport ${player.name}: ${e}`);
       }
+    }, 5);
+  }
 
-      // DEBUG: Force Daily Reset
-      if (ev.message === "!forcedaily") {
-        ev.cancel = true;
-        const data = ensureQuestData(ev.sender);
-        data.lastRefreshTime = 0; // Force expiry on next access
-        PersistenceManager.saveQuestData(ev.sender, data);
-        system.run(() => ev.sender.sendMessage("§eDebug: Next board open will trigger 24h refresh.§r"));
-      }
+  // Register player name for leaderboard + initialize SP
+  system.runTimeout(() => {
+    registerPlayerName(player);
+    initializePlayerSP(player);
 
-      // DEBUG: Register all online player names for leaderboard
-      if (ev.message === "!registernames") {
-        ev.cancel = true;
-        system.run(() => {
-          const players = world.getAllPlayers();
-          let count = 0;
-          for (const p of players) {
-            registerPlayerName(p);
-            count++;
-          }
-          ev.sender.sendMessage(`§aRegistered ${count} player name(s) for leaderboard.§r`);
+    system.runTimeout(() => {
+      updateSPDisplay(player);
+    }, 20);
+  }, 10);
+
+  // Load quest data
+  system.runTimeout(() => {
+    const data = ensureQuestData(player);
+
+    // Resume HUD if player has an active quest
+    if (data && data.active) {
+      const quest = data.active;
+      if ((quest.type === "kill" || quest.type === "mine") && data.progress < quest.requiredCount) {
+        updateQuestHud(player, {
+          ...quest,
+          progress: data.progress,
+          goal: quest.requiredCount,
+          status: "active"
         });
       }
+    }
+
+    // Encounter restoration on login
+    if (initialSpawn && data?.active?.isEncounter) {
+      const quest = data.active;
+      const progress = data.progress || 0;
+
+      switch (quest.encounterState) {
+        case "pending":
+          if (quest.encounterZone) {
+            const zone = quest.encounterZone;
+            player.sendMessage(`§eYou have an active encounter: §f${quest.encounterName}`);
+            player.sendMessage(`§7Travel to zone: ${zone.center.x}, ${zone.center.z}`);
+          }
+          break;
+
+        case "spawned":
+          if (quest.spawnData?.location) {
+            const remaining = quest.totalMobCount - progress;
+
+            if (remaining > 0) {
+              const dimension = player.dimension;
+              const entityIds = respawnRemainingMobs(quest, progress, dimension);
+
+              quest.spawnData.spawnedEntityIds = entityIds;
+              PersistenceManager.saveQuestData(player, data);
+
+              player.sendMessage(`§eYour encounter persists. §f${remaining} enemies remain.`);
+              player.sendMessage(`§7Location: ${Math.floor(quest.spawnData.location.x)}, ${Math.floor(quest.spawnData.location.y)}, ${Math.floor(quest.spawnData.location.z)}`);
+            } else {
+              quest.encounterState = "complete";
+              PersistenceManager.saveQuestData(player, data);
+              player.sendMessage(`§a${quest.encounterName} §fis complete! Return to the board.`);
+            }
+          }
+          break;
+
+        case "complete":
+          player.sendMessage(`§a${quest.encounterName} §fis complete! Return to the board to claim your reward.`);
+          break;
+      }
+    }
+  }, 15);
+}
+
+/**
+ * Player leave handler - cleans up music state, cats, encounters
+ */
+function handlePlayerLeave(ev) {
+  const playerId = ev.playerId;
+  playerMusicState.delete(playerId);
+  playerDogBarkState.delete(playerId);
+  const cachedQuestData = playerQuestDataCache.get(playerId);
+
+  // Clean up SP count-up animations
+  const players = world.getAllPlayers();
+  const leavingPlayer = players.find(p => p.id === playerId);
+  if (leavingPlayer) {
+    SPAnimator.clearPlayerAnimation(leavingPlayer);
+  }
+
+  // Despawn guardian cats
+  const catSquad = playerCatSquad.get(playerId);
+  if (catSquad && catSquad.cats) {
+    catSquad.cats.forEach(cat => {
+      try {
+        if (cat.isValid()) cat.remove();
+      } catch (e) { /* cat already gone */ }
     });
   }
+  playerCatSquad.delete(playerId);
+
+  // Encounter cleanup on logout
+  try {
+    const quest = cachedQuestData?.active;
+    if (quest?.isEncounter && quest.encounterState === "spawned" && quest.spawnData) {
+      const dimensionId = quest.spawnData.dimensionId || "overworld";
+      const dimension = world.getDimension(dimensionId);
+      const despawnedCount = despawnEncounterMobs(quest.id, dimension);
+
+      quest.spawnData.spawnedEntityIds = [];
+
+      const leavingPlayer = world.getAllPlayers().find(p => p.id === playerId);
+      if (leavingPlayer) {
+        PersistenceManager.saveQuestData(leavingPlayer, cachedQuestData);
+      }
+
+      if (despawnedCount > 0) {
+        console.log(`[main] Player ${playerId} logged out - despawned ${despawnedCount} mobs for quest ${quest.id}`);
+      }
+    }
+  } catch (error) {
+    console.error(`[main] Error handling encounter cleanup on player leave: ${error}`);
+  }
+
+  playerQuestDataCache.delete(playerId);
 }
+
+/**
+ * Atlas NPC interaction handler - wrapper
+ */
+function handleAtlasInteract(ev) {
+  const deps = {
+    lastInteractTime,
+    system
+  };
+  return handleAtlasInteractBase(ev, deps, showQuestMasterDialog);
+}
+
+/**
+ * Admin command: sq:givesp handler - wrapper
+ */
+function handleAdminGiveSP(ev) {
+  const deps = { world, adminAddSP };
+  return handleAdminGiveSPBase(ev, deps);
+}
+
+/**
+ * Admin command: sq:clearleaderboard handler
+ */
+function handleAdminClearLeaderboard(ev) {
+  const source = ev.sourceEntity;
+  const objective = world.scoreboard.getObjective(SCOREBOARD_OBJECTIVE_ID);
+
+  if (!objective) {
+    source?.sendMessage?.("§cLeaderboard objective missing.§r");
+    return;
+  }
+
+  let removed = 0;
+  try {
+    for (const participant of objective.getParticipants()) {
+      objective.removeParticipant(participant);
+      removed++;
+    }
+  } catch (e) {
+    console.warn(`[Leaderboard] Failed to clear leaderboard: ${e}`);
+    source?.sendMessage?.("§cFailed to clear leaderboard. Check logs.§r");
+    return;
+  }
+
+  source?.sendMessage?.(`§aCleared leaderboard (${removed} entr${removed === 1 ? "y" : "ies"}).§r`);
+}
+
+// =============================================================================
+// BOOTSTRAP
+// =============================================================================
 
 function bootstrap() {
   // Initialize SuperPoints scoreboard objective
@@ -2050,115 +1621,24 @@ function bootstrap() {
     // May fail if nothing set, that's fine
   }
 
-  wireInteractions();
-  world.afterEvents.entityDie.subscribe(handleEntityDeath);
-  world.afterEvents.playerBreakBlock.subscribe(handleBlockBreak);
-  wireEntityHitTracking();
+  // === PHASE 2: Register all event subscriptions ===
+  registerEvents({
+    handlers: {
+      onWorldInitialize: handleWorldInitialize,
+      onPlayerSpawn: handlePlayerSpawn,
+      onPlayerLeave: handlePlayerLeave,
+      onEntityDeath: handleEntityDeath,
+      onBlockBreak: handleBlockBreak,
+      onAtlasInteract: handleAtlasInteract,
+      onAdminGiveSP: handleAdminGiveSP,
+      onAdminClearLeaderboard: handleAdminClearLeaderboard,
+    },
+    wireInteractions,
+    wireEntityHitTracking
+  });
+
   registerSafeZoneEvents();
   AtmosphereManager.init();
-
-  // Atlas NPC Interaction
-  system.afterEvents.scriptEventReceive.subscribe((ev) => {
-    if (ev.id !== "quest:npc_interact") return;
-
-    // Find the player who triggered this (nearest player to the entity)
-    const entity = ev.sourceEntity;
-    if (!entity) return;
-
-    // Get nearest player within 3 blocks
-    const nearbyPlayers = entity.dimension.getPlayers({
-      location: entity.location,
-      maxDistance: 3
-    });
-
-    if (nearbyPlayers.length === 0) return;
-    const player = nearbyPlayers[0];
-
-    // Debounce check (reuse existing pattern)
-    const now = Date.now();
-    const lastTime = lastInteractTime.get(player.name + "_npc") || 0;
-    if (now - lastTime < 500) return;
-    lastInteractTime.set(player.name + "_npc", now);
-
-    // Auto-name the NPC (force correct name on every interaction)
-    if (entity.nameTag !== "§5Atlas") {
-      entity.nameTag = "§5Atlas";
-    }
-
-    // Play Atlas greet sound
-    player.playSound("ui.npc_questmaster_greet", { volume: 0.8, pitch: 1.0 });
-
-    // Occasionally play idle sound too (20% chance for flavor)
-    if (Math.random() < 0.2) {
-      system.runTimeout(() => {
-        player.playSound("ui.npc_questmaster_idle", { volume: 0.5, pitch: 1.0 });
-      }, 15); // Slight delay (0.75 sec)
-    }
-
-    // Show dialog
-    showQuestMasterDialog(player);
-  });
-
-  // === Admin Command: sq:givesp ===
-  // Usage: /scriptevent sq:givesp <player|@s> <amount>
-  system.afterEvents.scriptEventReceive.subscribe((ev) => {
-    if (ev.id !== "sq:givesp") return;
-
-    const source = ev.sourceEntity;
-    const args = ev.message.trim().split(/\s+/);
-
-    // Validate args
-    if (args.length < 2) {
-      if (source) {
-        source.sendMessage("§cUsage: /scriptevent sq:givesp <player|@s> <amount>");
-      }
-      return;
-    }
-
-    const [targetArg, amountArg] = args;
-    const amount = parseInt(amountArg, 10);
-
-    if (isNaN(amount)) {
-      if (source) {
-        source.sendMessage("§cInvalid amount. Must be an integer.");
-      }
-      return;
-    }
-
-    // Resolve target player
-    let targetPlayer;
-    if (targetArg === "@s") {
-      if (!source) {
-        console.warn("[SuperQuester] @s used from non-player source");
-        return;
-      }
-      targetPlayer = source;
-    } else {
-      // Find player by name
-      targetPlayer = world.getAllPlayers().find(p => p.name === targetArg);
-      if (!targetPlayer) {
-        if (source) {
-          source.sendMessage(`§cPlayer "${targetArg}" not found or not online.`);
-        }
-        return;
-      }
-    }
-
-    // Modify SP
-    const oldBalance = getSP(targetPlayer);
-    const newBalance = modifySP(targetPlayer, amount);
-    const actualDelta = newBalance - oldBalance;
-
-    // Admin feedback
-    const sign = actualDelta >= 0 ? "+" : "";
-    const feedback = `§a[SP Admin] §r${targetPlayer.name}: ${oldBalance} → ${newBalance} (${sign}${actualDelta})`;
-
-    if (source) {
-      source.sendMessage(feedback);
-    } else {
-      console.log(feedback);
-    }
-  });
 
   system.runInterval(() => {
     // Clean up entity hit map
@@ -2179,6 +1659,11 @@ function bootstrap() {
 
       const quest = data.active;
       let changed = false;
+
+      // Skip HUD updates for encounter quests - EncounterProximity handles those
+      if (quest.isEncounter) {
+        continue;
+      }
 
       // 1. Gather Logic (Active only)
       if (quest.type === "gather" && quest.targetItemIds) {
@@ -2223,321 +1708,95 @@ function bootstrap() {
     }
   }, 20);
 
-  // === TOWN MUSIC ZONE LOOP ===
-  // Checks every MUSIC_CHECK_INTERVAL ticks (~0.5 seconds) for player proximity to town
-  // Plays music when entering, loops it while inside, stops when leaving
-  system.runInterval(() => {
-    const currentTick = system.currentTick;
+  // === AMBIENT SYSTEMS (Phase 6 - Extracted) ===
+  // Initialize town music zone
+  initializeTownMusicLoop({
+    system,
+    world,
+    playerMusicState,
+    QUEST_BOARD_LOCATION,
+    TOWN_RADIUS,
+    TOWN_MUSIC_SOUND_ID,
+    TRACK_DURATION_TICKS,
+    MUSIC_CHECK_INTERVAL
+  });
 
-    for (const player of world.getPlayers()) {
-      const location = player.location;
-      const playerId = player.id;
+  // Initialize SPSS music zone
+  initializeSPSSMusicLoop({
+    system,
+    world,
+    playerSPSSMusicState,
+    SPSS_ZONE_BOUNDS,
+    SPSS_MUSIC_SOUND_ID,
+    SPSS_TRACK_DURATION_TICKS: SPSS_TRACK_DURATION_TICKS,
+    SPSS_MUSIC_CHECK_INTERVAL
+  });
 
-      // Calculate 2D distance to town center (cylinder check, ignore Y)
-      const dx = location.x - QUEST_BOARD_LOCATION.x;
-      const dz = location.z - QUEST_BOARD_LOCATION.z;
-      const distanceSquared = dx * dx + dz * dz;
-      const isInZone = distanceSquared <= (TOWN_RADIUS * TOWN_RADIUS);
+  // Initialize dog barking zone
+  initializeDogBarkingLoop({
+    system,
+    world,
+    playerDogState: playerDogBarkState,
+    QUEST_BOARD_LOCATION,
+    DOG_SOUNDS,
+    MONKEY_SOUNDS,
+    DOG_DISTANCE_TIERS,
+    DOG_MAX_RADIUS,
+    DOG_CHECK_INTERVAL,
+    DOG_REPLAY_TICKS
+  });
 
-      // Get or create player's music state
-      let state = playerMusicState.get(playerId);
-      if (!state) {
-        state = { inZone: false, nextReplayTick: 0 };
-        playerMusicState.set(playerId, state);
-      }
-
-      if (isInZone) {
-        // Player is in the town zone
-        if (!state.inZone) {
-          // ENTERED the zone - start music!
-          state.inZone = true;
-          state.nextReplayTick = currentTick + TRACK_DURATION_TICKS;
-          try {
-            player.runCommandAsync(`playsound ${TOWN_MUSIC_SOUND_ID} @s ~ ~ ~ 0.75 1`);
-            // console.warn(`[TownMusic] ${player.name} entered zone - starting music`);
-          } catch (e) {
-            console.warn(`[TownMusic] Failed to play for ${player.name}: ${e}`);
-          }
-        } else if (currentTick >= state.nextReplayTick) {
-          // STILL in zone and time to loop - replay track!
-          state.nextReplayTick = currentTick + TRACK_DURATION_TICKS;
-          try {
-            player.runCommandAsync(`playsound ${TOWN_MUSIC_SOUND_ID} @s ~ ~ ~ 0.75 1`);
-            // console.warn(`[TownMusic] ${player.name} looping music`);
-          } catch (e) {
-            console.warn(`[TownMusic] Failed to loop for ${player.name}: ${e}`);
-          }
-        }
-        // If still in zone but not time to replay yet, do nothing (music still playing)
-      } else {
-        // Player is outside the town zone
-        if (state.inZone) {
-          // LEFT the zone - stop music!
-          state.inZone = false;
-          state.nextReplayTick = 0;
-          try {
-            // Stop using stopsound command - target the specific sound
-            player.runCommandAsync(`stopsound @s ${TOWN_MUSIC_SOUND_ID}`);
-            // console.warn(`[TownMusic] ${player.name} left zone - stopping music`);
-          } catch (e) {
-            console.warn(`[TownMusic] Failed to stop for ${player.name}: ${e}`);
-          }
-        }
-        // If already outside and music was stopped, do nothing
-      }
-    }
-  }, MUSIC_CHECK_INTERVAL);
-
-  // === RIDICULOUS DOG BARKING ZONE LOOP ===
-  // Distance-based intensity: The closer you get, the more dogs you hear!
-  // Outer (3-6 blocks): 1 faint track
-  // Mid (1-3 blocks): 2 tracks at moderate volume
-  // Inner (<1 block): 3 tracks FULL CHAOS + bonus barks
-  system.runInterval(() => {
-    const currentTick = system.currentTick;
-
-    for (const player of world.getPlayers()) {
-      const location = player.location;
-      const playerId = player.id;
-
-      // Calculate 3D distance to quest board
-      const dx = location.x - QUEST_BOARD_LOCATION.x;
-      const dy = location.y - QUEST_BOARD_LOCATION.y;
-      const dz = location.z - QUEST_BOARD_LOCATION.z;
-      const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-
-      // Get or create player's dog bark state
-      let state = playerDogBarkState.get(playerId);
-      if (!state) {
-        state = { inZone: false, nextBarkTick: 0, lastTier: -1 };
-        playerDogBarkState.set(playerId, state);
-      }
-
-      // Find which tier the player is in (check from innermost to outermost)
-      let activeTier = null;
-      for (let i = DOG_DISTANCE_TIERS.length - 1; i >= 0; i--) {
-        if (distance <= DOG_DISTANCE_TIERS[i].maxDist) {
-          activeTier = DOG_DISTANCE_TIERS[i];
-          break;
-        }
-      }
-
-      if (activeTier) {
-        // Player is in a bark zone!
-        const tierChanged = state.lastTier !== activeTier.maxDist;
-
-        if (!state.inZone || currentTick >= state.nextBarkTick || tierChanged) {
-          // ENTERED, tier changed, or time to bark again
-          state.inZone = true;
-          state.lastTier = activeTier.maxDist;
-          state.nextBarkTick = currentTick + DOG_REPLAY_TICKS;
-
-          // Shuffle the sounds array to randomize which tracks play
-          const shuffledSounds = [...DOG_SOUNDS].sort(() => Math.random() - 0.5);
-
-          // Play the appropriate number of tracks for this tier
-          for (let i = 0; i < activeTier.tracks; i++) {
-            const soundId = shuffledSounds[i];
-            const delay = Math.floor(Math.random() * 5); // Stagger 0-5 ticks
-
-            system.runTimeout(() => {
-              try {
-                // Random volume within tier's range
-                const volume = activeTier.minVol + Math.random() * (activeTier.maxVol - activeTier.minVol);
-                const pitch = 0.8 + Math.random() * 0.4; // 0.8-1.2 pitch
-                player.playSound(soundId, { volume, pitch });
-              } catch (e) {
-                // Silently fail
-              }
-            }, delay);
-          }
-
-          // BONUS: Add extra random barks + MONKEYS in the core zone (FULL CHAOS mode)
-          if (activeTier.maxDist <= 2) {
-            // Extra dog barks
-            for (let i = 0; i < 3; i++) {
-              const randomDelay = 10 + Math.floor(Math.random() * 20);
-              const randomSound = DOG_SOUNDS[Math.floor(Math.random() * DOG_SOUNDS.length)];
-              system.runTimeout(() => {
-                try {
-                  const volume = activeTier.minVol + Math.random() * (activeTier.maxVol - activeTier.minVol);
-                  const pitch = 0.6 + Math.random() * 0.8; // Even more pitch variety for chaos
-                  player.playSound(randomSound, { volume, pitch });
-                } catch (e) {
-                  // Silently fail
-                }
-              }, randomDelay);
-            }
-
-            // 🐵 MONKEYS JOIN THE CHAOS!
-            MONKEY_SOUNDS.forEach(monkeySound => {
-              const monkeyDelay = 5 + Math.floor(Math.random() * 15);
-              system.runTimeout(() => {
-                try {
-                  const volume = 0.15 + Math.random() * 0.1; // 15-25% volume (halved)
-                  const pitch = 0.9 + Math.random() * 0.3; // 0.9-1.2 pitch
-                  player.playSound(monkeySound, { volume, pitch });
-                } catch (e) {
-                  // Silently fail
-                }
-              }, monkeyDelay);
-            });
-          }
-
-          // console.warn(`[DogZone] ${player.name} in tier ${activeTier.maxDist}m (${activeTier.tracks} tracks)`);
-        }
-      } else {
-        // Player is outside all zones
-        if (state.inZone) {
-          state.inZone = false;
-          state.lastTier = -1;
-          state.nextBarkTick = 0;
-          // Stop all dog sounds
-          DOG_SOUNDS.forEach(soundId => {
-            try {
-              player.runCommandAsync(`stopsound @s ${soundId}`);
-            } catch (e) {
-              // Silently fail
-            }
-          });
-          // Stop monkey sounds too
-          MONKEY_SOUNDS.forEach(soundId => {
-            try {
-              player.runCommandAsync(`stopsound @s ${soundId}`);
-            } catch (e) {
-              // Silently fail
-            }
-          });
-          // console.warn(`[DogZone] ${player.name} escaped the chaos`);
-        }
-      }
-    }
-  }, DOG_CHECK_INTERVAL);
-
-  // === CAT PROTECTION SQUAD LOOP ===
-  // Spawns physical cats around players to protect them from phantom dogs!
-  // The closer to the quest board, the more cats spawn
-  system.runInterval(() => {
-    for (const player of world.getPlayers()) {
-      const location = player.location;
-      const playerId = player.id;
-
-      // Calculate 3D distance to quest board
-      const dx = location.x - QUEST_BOARD_LOCATION.x;
-      const dy = location.y - QUEST_BOARD_LOCATION.y;
-      const dz = location.z - QUEST_BOARD_LOCATION.z;
-      const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-
-      // Get or create player's cat squad state
-      let squad = playerCatSquad.get(playerId);
-      if (!squad) {
-        squad = { cats: [], lastTier: -1 };
-        playerCatSquad.set(playerId, squad);
-      }
-
-      // Clean up any invalid (dead/removed) cats from the list
-      squad.cats = squad.cats.filter(cat => {
-        try {
-          return cat.isValid();
-        } catch (e) {
-          return false;
-        }
-      });
-
-      // Find which tier the player is in
-      let activeTier = null;
-      for (let i = CAT_DISTANCE_TIERS.length - 1; i >= 0; i--) {
-        if (distance <= CAT_DISTANCE_TIERS[i].maxDist) {
-          activeTier = CAT_DISTANCE_TIERS[i];
-          break;
-        }
-      }
-
-      if (activeTier) {
-        // Player is in a cat zone!
-        const targetCatCount = activeTier.cats;
-        const currentCatCount = squad.cats.length;
-        const tierChanged = squad.lastTier !== activeTier.maxDist;
-
-        // Spawn more cats if needed
-        if (currentCatCount < targetCatCount) {
-          const catsToSpawn = targetCatCount - currentCatCount;
-
-          for (let i = 0; i < catsToSpawn; i++) {
-            try {
-              // Random position around player
-              const angle = Math.random() * Math.PI * 2;
-              const spawnX = player.location.x + Math.cos(angle) * CAT_SPAWN_RADIUS;
-              const spawnZ = player.location.z + Math.sin(angle) * CAT_SPAWN_RADIUS;
-              const spawnY = player.location.y + 1; // Spawn 1 block above and let them fall
-
-              // Spawn a random cat variant
-              const catType = CAT_VARIANTS[Math.floor(Math.random() * CAT_VARIANTS.length)];
-
-              // Spawn location 1 block above ground
-              const spawnLoc = { x: spawnX, y: spawnY, z: spawnZ };
-
-              // Use player's dimension
-              const dimension = player.dimension;
-              const cat = dimension.spawnEntity("minecraft:cat", spawnLoc);
-
-              if (cat) {
-                // Tag for identification - cats wander freely (no sitting!)
-                cat.addTag("quest_board_cat");
-                cat.addTag("guardian_cat");
-
-                // NO taming - let them be wild and wander around!
-
-                // Add to squad
-                squad.cats.push(cat);
-
-                // console.warn(`[CatSquad] Spawned guardian cat for ${player.name}`);
-              }
-            } catch (e) {
-              // console.warn(`[CatSquad] Failed to spawn cat: ${e}`);
-            }
-          }
-        }
-
-        // Remove excess cats if tier decreased
-        else if (currentCatCount > targetCatCount) {
-          const catsToRemove = currentCatCount - targetCatCount;
-          for (let i = 0; i < catsToRemove; i++) {
-            const cat = squad.cats.pop();
-            try {
-              if (cat && cat.isValid()) {
-                // Play a poof particle effect before removing
-                cat.dimension.spawnParticle("minecraft:explosion_particle", cat.location);
-                cat.remove();
-              }
-            } catch (e) { /* cat already gone */ }
-          }
-        }
-
-        squad.lastTier = activeTier.maxDist;
-
-      } else {
-        // Player is outside all zones - despawn all cats
-        if (squad.cats.length > 0) {
-          squad.cats.forEach(cat => {
-            try {
-              if (cat.isValid()) {
-                // Poof effect
-                cat.dimension.spawnParticle("minecraft:explosion_particle", cat.location);
-                cat.remove();
-              }
-            } catch (e) { /* cat already gone */ }
-          });
-          squad.cats = [];
-          squad.lastTier = -1;
-          // console.warn(`[CatSquad] ${player.name} left zone - cats despawned`);
-        }
-      }
-    }
-  }, CAT_CHECK_INTERVAL);
+  // Initialize cat protection squad
+  initializeCatSquadLoop({
+    system,
+    world,
+    playerCatSquad,
+    QUEST_BOARD_LOCATION,
+    CAT_DISTANCE_TIERS,
+    CAT_MAX_RADIUS,
+    CAT_CHECK_INTERVAL,
+    CAT_SPAWN_RADIUS,
+    CAT_VARIANTS
+  });
 }
 
 // === ADMIN COMMANDS ===
+
+/**
+ * Update Sheep NPC interaction handler.
+ * Triggered when a player interacts with the Update Sheep entity.
+ */
+system.afterEvents.scriptEventReceive.subscribe((event) => {
+  if (event.id === "sq:update_sheep_interact") {
+    handleUpdateSheepInteract(event, ensureQuestData, PersistenceManager, lastInteractTime);
+  }
+});
+
+/**
+ * Update Sheep spawn handler.
+ * Sets the name tag when the entity spawns.
+ */
+system.afterEvents.scriptEventReceive.subscribe((event) => {
+  if (event.id === "sq:update_sheep_spawned") {
+    const entity = event.sourceEntity;
+    if (entity && entity.typeId === "quest:update_sheep") {
+      entity.nameTag = "Update Sheep™";
+    }
+  }
+});
+
+/**
+ * Atlas spawn handler.
+ * Sets the name tag when the entity spawns.
+ */
+system.afterEvents.scriptEventReceive.subscribe((event) => {
+  if (event.id === "quest:atlas_spawned") {
+    const entity = event.sourceEntity;
+    if (entity && entity.typeId === "quest:quest_master") {
+      entity.nameTag = "Atlas";
+    }
+  }
+});
 
 /**
  * Admin scriptevent handler for giving SP to players.
@@ -2588,6 +1847,251 @@ system.afterEvents.scriptEventReceive.subscribe((event) => {
     } else {
       player.sendMessage("§cFailed to award SP.");
     }
+  }
+});
+
+// ============================================================================
+// CELEBRATION SYSTEM - Test Command
+// ============================================================================
+// Test command for celebration effects
+// Usage: /scriptevent sq:test_spgain [amount]
+// ============================================================================
+system.afterEvents.scriptEventReceive.subscribe((event) => {
+  if (event.id !== "sq:test_spgain") return;
+
+  const player = event.sourceEntity;
+  if (!player || player.typeId !== "minecraft:player") {
+    console.warn("[Celebration] Test command must be run by a player");
+    return;
+  }
+
+  const amount = parseInt(event.message) || 50;
+  celebrateSPGain(player, amount);
+  player.sendMessage(`§aTesting celebration effect with §e${amount} SP§a gain`);
+});
+
+// ============================================================================
+// PHASE 2: Quest Celebration Test Commands
+// Usage: /scriptevent sq:test_celebration <rarity> [modifier]
+// 
+// Examples:
+//   /scriptevent sq:test_celebration common
+//   /scriptevent sq:test_celebration rare
+//   /scriptevent sq:test_celebration legendary
+//   /scriptevent sq:test_celebration mythic
+//   /scriptevent sq:test_celebration legendary jackpot
+//   /scriptevent sq:test_celebration rare streak
+//   /scriptevent sq:test_celebration mythic jackpot
+// ============================================================================
+system.afterEvents.scriptEventReceive.subscribe((event) => {
+  if (event.id !== "sq:test_celebration") return;
+
+  const player = event.sourceEntity;
+  if (!player || player.typeId !== "minecraft:player") {
+    console.warn("[Celebration] Test command must be run by a player");
+    return;
+  }
+
+  const args = event.message.split(" ");
+  const rarity = args[0] || "common";
+  const modifier = args[1] || null;
+  
+  // Validate rarity
+  const validRarities = ["common", "rare", "legendary", "mythic"];
+  if (!validRarities.includes(rarity)) {
+    player.sendMessage(`§cInvalid rarity: ${rarity}. Use: common, rare, legendary, or mythic`);
+    return;
+  }
+  
+  // SP amounts per rarity for testing
+  const spAmounts = { common: 25, rare: 75, legendary: 200, mythic: 500 };
+  
+  celebrateQuestComplete(player, {
+    rarity: rarity,
+    spAmount: spAmounts[rarity],
+    isJackpot: modifier === "jackpot",
+    streakLabel: modifier === "streak" ? "3-Quest Streak!" : null
+  });
+  
+  player.sendMessage(`§aTesting §e${rarity}§a celebration${modifier ? ` with §e${modifier}` : ""}`);
+});
+
+// ============================================================================
+// PHASE 3: SP COUNT-UP ANIMATION - Test Commands
+// ============================================================================
+// Test commands for the SP count-up animation system
+// Usage: /scriptevent sq:test_countup [amount]
+// Usage: /scriptevent sq:test_instant [value]
+// Usage: /scriptevent sq:test_rapid
+// ============================================================================
+
+// Test SP count-up animation with various amounts
+system.afterEvents.scriptEventReceive.subscribe((event) => {
+  if (event.id !== "sq:test_countup") return;
+
+  const player = event.sourceEntity;
+  if (!player || player.typeId !== "minecraft:player") {
+    console.warn("[SPAnimator] Test command must be run by a player");
+    return;
+  }
+
+  const amount = parseInt(event.message) || 50;
+  const currentSP = getSP(player);
+  
+  // Simulate gaining SP with animation
+  SPAnimator.animateCountUp(
+    player,
+    currentSP,
+    currentSP + amount,
+    sendSPDisplayValue
+  );
+  
+  player.sendMessage(`§aTesting count-up animation: §e${currentSP} → ${currentSP + amount}`);
+});
+
+// Test instant display (no animation)
+system.afterEvents.scriptEventReceive.subscribe((event) => {
+  if (event.id !== "sq:test_instant") return;
+
+  const player = event.sourceEntity;
+  if (!player || player.typeId !== "minecraft:player") {
+    console.warn("[SPAnimator] Test command must be run by a player");
+    return;
+  }
+
+  const value = parseInt(event.message) || 9999;
+  sendSPDisplayValue(player, value);
+  player.sendMessage(`§aSet display to §e${value}§a instantly (no animation)`);
+});
+
+// Test rapid SP gains (interrupt handling)
+system.afterEvents.scriptEventReceive.subscribe((event) => {
+  if (event.id !== "sq:test_rapid") return;
+
+  const player = event.sourceEntity;
+  if (!player || player.typeId !== "minecraft:player") {
+    console.warn("[SPAnimator] Test command must be run by a player");
+    return;
+  }
+
+  const base = getSP(player);
+  
+  player.sendMessage("§aTesting rapid gains (interrupt handling)...");
+  
+  // Fire three SP gains in quick succession
+  SPAnimator.animateCountUp(player, base, base + 25, sendSPDisplayValue);
+  
+  system.runTimeout(() => {
+    SPAnimator.animateCountUp(player, base + 25, base + 75, sendSPDisplayValue);
+  }, 10);
+  
+  system.runTimeout(() => {
+    SPAnimator.animateCountUp(player, base + 75, base + 150, sendSPDisplayValue);
+  }, 20);
+});
+
+// ============================================================================
+// PHASE 2: ENCOUNTER SYSTEM - Debug Script Events
+// ============================================================================
+// Admin commands for testing encounter functionality
+// These use /scriptevent instead of chat commands for reliability
+//
+// Available commands:
+// - /scriptevent sq:encounter info - Show active encounter details
+// - /scriptevent sq:encounter count - Count remaining alive mobs
+// - /scriptevent sq:encounter complete - Force complete active encounter
+// - /scriptevent sq:encounter spawn - Spawn test encounter at player location
+// - /scriptevent sq:encounter despawn - Despawn test encounter mobs
+// ============================================================================
+system.afterEvents.scriptEventReceive.subscribe((event) => {
+  // Only handle encounter-related events
+  if (!event.id.startsWith("sq:encounter")) return;
+
+  const player = event.sourceEntity;
+  if (!player || player.typeId !== "minecraft:player") {
+    console.warn("[Encounter] Commands must be run by a player");
+    return;
+  }
+
+  const command = event.message.trim();
+
+  // === INFO: Show active encounter details ===
+  if (command === "info") {
+    const questData = ensureQuestData(player);
+
+    if (questData.active && questData.active.isEncounter) {
+      const q = questData.active;
+      player.sendMessage(`§e=== Active Encounter ===`);
+      player.sendMessage(`§fName: ${q.encounterName}`);
+      player.sendMessage(`§fProgress: ${questData.progress}/${q.totalMobCount}`);
+      player.sendMessage(`§fQuest ID: ${q.id}`);
+
+      if (q.spawnData) {
+        const loc = q.spawnData.location;
+        player.sendMessage(`§fSpawn: ${Math.floor(loc.x)}, ${Math.floor(loc.y)}, ${Math.floor(loc.z)}`);
+        player.sendMessage(`§fSpawned IDs: ${q.spawnData.spawnedEntityIds.length}`);
+      } else {
+        player.sendMessage(`§7No spawn data (not yet accepted?)`);
+      }
+    } else {
+      player.sendMessage(`§cNo active encounter quest`);
+    }
+  }
+
+  // === COUNT: Count remaining alive mobs ===
+  else if (command === "count") {
+    const questData = ensureQuestData(player);
+
+    if (questData.active && questData.active.isEncounter) {
+      const remaining = countRemainingMobs(questData.active.id, player.dimension);
+      player.sendMessage(`§eAlive mobs: ${remaining}`);
+      player.sendMessage(`§7Progress: ${questData.progress}/${questData.active.totalMobCount}`);
+    } else {
+      player.sendMessage(`§cNo active encounter quest`);
+    }
+  }
+
+  // === COMPLETE: Force complete active encounter (for testing turn-in) ===
+  else if (command === "complete") {
+    const questData = ensureQuestData(player);
+
+    if (questData.active && questData.active.isEncounter) {
+      questData.progress = questData.active.totalMobCount;
+      PersistenceManager.saveQuestData(player, questData);
+      player.sendMessage(`§aEncounter marked complete - return to board to turn in`);
+    } else {
+      player.sendMessage(`§cNo active encounter quest`);
+    }
+  }
+
+  // === SPAWN: Spawn test encounter at player location ===
+  else if (command === "spawn") {
+    // Import encounter table dynamically
+    import("./data/EncounterTable.js").then(({ ENCOUNTER_TABLE }) => {
+      const testEncounter = ENCOUNTER_TABLE[0];  // skeleton_warband
+      const testQuest = {
+        id: "debug_test",
+        encounterMobs: testEncounter.mobs
+      };
+
+      const entityIds = spawnEncounterMobs(testQuest, player.location, player.dimension);
+      player.sendMessage(`§aSpawned ${entityIds.length} test mobs at your location`);
+    }).catch(error => {
+      player.sendMessage(`§cFailed to spawn test encounter: ${error.message}`);
+      console.error("[Encounter] Spawn test failed:", error);
+    });
+  }
+
+  // === DESPAWN: Despawn test encounter mobs ===
+  else if (command === "despawn") {
+    const count = despawnEncounterMobs("debug_test", player.dimension);
+    player.sendMessage(`§aDespawned ${count} test mobs`);
+  }
+
+  // === UNKNOWN COMMAND ===
+  else {
+    player.sendMessage(`§cUnknown encounter command: ${command}`);
+    player.sendMessage(`§7Available: info, count, complete, spawn, despawn`);
   }
 });
 

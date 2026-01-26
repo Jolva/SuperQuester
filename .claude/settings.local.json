@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -c:*)",
+      "Bash(git checkout:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nfeat: Complete Phase 5 of Encounter System with navigation and cleanup\n\nPhase 5 implements:\n- Directional arrow navigation \\(8 directions relative to player facing\\)\n- Sky beacon particle column when within 150 blocks of target\n- Orphan mob cleanup on server start \\(with 5-second delay\\)\n\nBug fixes during Phase 5:\n- Fixed arrow calculation to use correct Minecraft yaw convention\n- Fixed progress display to use stored progress instead of live mob count\n- Fixed orphan cleanup timing to prevent race condition on startup\n\nUpdates documentation with current status and known issues.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(curl:*)",
+      "Bash(tree:*)",
+      "Bash(python:*)",
+      "Bash(ls:*)",
+      "Bash(find:*)"
+    ]
+  }
+}

@@ -105,6 +105,21 @@
     },
     "txt_leader_bot_down": {
       "textures": "textures/blocks/quest_legend_bot_bottom"
+    },
+    "txt_spss_green": {
+      "textures": "textures/blocks/spss_green"
+    },
+    "txt_spss_top_left_image": {
+      "textures": "textures/blocks/spss_top_left_image"
+    },
+    "txt_spss_top_right_image": {
+      "textures": "textures/blocks/spss_top_right_image"
+    },
+    "txt_spss_bottom_left_image": {
+      "textures": "textures/blocks/spss_bottom_left_image"
+    },
+    "txt_spss_bottom_right_image": {
+      "textures": "textures/blocks/spss_bottom_right_image"
     }
   }
 }

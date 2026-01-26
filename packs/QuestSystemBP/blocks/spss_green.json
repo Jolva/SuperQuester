@@ -1,0 +1,17 @@
+{
+  "format_version": "1.20.50",
+  "minecraft:block": {
+    "description": {
+      "identifier": "spss:green"
+    },
+    "components": {
+      "minecraft:geometry": "minecraft:geometry.full_block",
+      "minecraft:material_instances": {
+        "*": {
+          "texture": "txt_spss_green",
+          "render_method": "opaque"
+        }
+      }
+    }
+  }
+}

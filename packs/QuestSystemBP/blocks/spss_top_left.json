@@ -1,0 +1,37 @@
+{
+  "format_version": "1.20.50",
+  "minecraft:block": {
+    "description": {
+      "identifier": "spss:top_left"
+    },
+    "components": {
+      "minecraft:geometry": "minecraft:geometry.full_block",
+      "minecraft:material_instances": {
+        "south": {
+          "texture": "txt_spss_top_left_image",
+          "render_method": "opaque"
+        },
+        "east": {
+          "texture": "txt_spss_green",
+          "render_method": "opaque"
+        },
+        "west": {
+          "texture": "txt_spss_green",
+          "render_method": "opaque"
+        },
+        "north": {
+          "texture": "txt_spss_green",
+          "render_method": "opaque"
+        },
+        "up": {
+          "texture": "txt_spss_green",
+          "render_method": "opaque"
+        },
+        "down": {
+          "texture": "txt_spss_green",
+          "render_method": "opaque"
+        }
+      }
+    }
+  }
+}

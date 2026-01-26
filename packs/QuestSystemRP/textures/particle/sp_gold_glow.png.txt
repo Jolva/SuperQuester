@@ -1,0 +1,21 @@
+TEXTURE NEEDED: sp_gold_glow.png
+
+This file should be a 64x64 PNG with:
+- Soft circular gradient (no hard edges)
+- White/light gray center
+- Fades to transparent at edges
+- Radial gradient from center
+
+The particle JSON will colorize this to gold/amber using tinting.
+
+To create:
+1. Create a 64x64 PNG image
+2. Draw a radial gradient: white center → transparent edges
+3. Use Gaussian blur for soft edges
+4. Save as "sp_gold_glow.png" in this directory
+
+OR use an online tool like: https://www.pixilart.com/
+- Canvas size: 64x64
+- Draw white circle in center
+- Use blur/gradient tool
+- Export as PNG
